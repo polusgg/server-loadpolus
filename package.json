@@ -33,7 +33,9 @@
     "typescript-to-lua": "^0.38.0"
   },
   "dependencies": {
+    "@types/ioredis": "^4.19.4",
     "@types/redis": "^2.8.28",
+    "ioredis": "^4.22.0",
     "nodepolus": "file:../NodePolusRewrite",
     "redis": "^3.0.2"
   }

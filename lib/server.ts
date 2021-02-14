@@ -1,5 +1,5 @@
 import dgram from "dgram";
-import redis, { RedisClient } from "redis";
+import Redis from "ioredis";
 import { Connection } from "nodepolus/lib/protocol/connection";
 import { BaseRootPacket, JoinedGamePacket } from "nodepolus/lib/protocol/packets/root";
 import { PacketDestination, RootPacketType } from "nodepolus/lib/protocol/packets/types/enums";
@@ -12,7 +12,7 @@ import { scope } from "./util/scopes";
 export class Server {
   private readonly serverSocket = dgram.createSocket("udp4");
   private readonly connections: Map<string, Connection> = new Map();
-  private readonly redisClient: RedisClient;
+  private readonly redisClient: Redis.Redis;
 
   private connectionIndex = 0;
 
@@ -21,14 +21,19 @@ export class Server {
       this.getConnection(ConnectionInfo.fromString(`${remoteInfo.address}:${remoteInfo.port}`)).emit("message", new MessageReader(buf));
     });
 
-    this.redisClient = redis.createClient(this.config.redis);
+    this.redisClient = new Redis({
+      port: 6379,
+      host: "127.0.0.1",
+      family: 4,
+      password: "auth",
+      db: 0,
+    });
 
-    if (!this.redisClient.ping()) {
-      throw new Error("Failed to connect to Redis!");
-    }
+    this.redisClient.connect();
   }
 
   listen(): void {
+    console.log(`Server running on ${this.config.server.host}:${this.config.server.port}`);
     this.serverSocket.bind(this.config.server.port, this.config.server.host);
   }
 
@@ -73,8 +78,8 @@ export class Server {
     return this.connectionIndex;
   }
 
-  private handlePacket(packet: BaseRootPacket, _sender: Connection): void {
-    console.log(BaseRootPacket);
+  private async handlePacket(packet: BaseRootPacket, _sender: Connection): Promise<void> {
+    console.log(packet);
 
     switch (packet.type) {
       case RootPacketType.HostGame: {
@@ -83,7 +88,10 @@ export class Server {
       case RootPacketType.JoinGame: {
         const joinedGamePacket = packet as JoinedGamePacket;
 
-        this.redisClient.hmget(scope("loadpolus", "lobby", joinedGamePacket.lobbyCode));
+        let lobbyData = await this.redisClient.hmget(scope("loadpolus", "lobby", joinedGamePacket.lobbyCode));
+
+        this.redisClient.hmset("key", "value", "key2", "value2");
+
         break;
       }
       case RootPacketType.GetGameList: {
@@ -106,9 +114,9 @@ export class Server {
 
     console.log("Initialized connection", newConnection.id);
 
-    newConnection.on("packet", (packet: BaseRootPacket) => {
+    newConnection.on("packet", async (packet: BaseRootPacket) => {
       if (!packet.isCancelled) {
-        this.handlePacket(packet, newConnection);
+        await this.handlePacket(packet, newConnection);
       }
     });
 

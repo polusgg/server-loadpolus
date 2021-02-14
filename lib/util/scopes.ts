@@ -2,7 +2,7 @@ export function scope(...scopes: string[]): string {
   return scopes.join(".");
 }
 
-let str = `
+/*
 [ Friend Games ]
 Sanae
 Saghetti
@@ -32,7 +32,6 @@ script on redis:
 4. filter by 0<players<10
 filter games by gamemode = "zombies";
 
-
 C => S : GetGameList
 S => C : DummyGames[] [RandomServer, 196], [RandomServer, 197]
 C => N : I want game 196
@@ -43,7 +42,6 @@ N => C : Redirect [IP, PORT]
 C => D : I want game 196
 // we know this server has a 196
 // new server needs a game
-
 
 C => S : GetGameList
 S => C : DummyGames[] [RandomServer, 196], [RandomServer, 197]
@@ -56,7 +54,6 @@ C => N : I want game 196
 N => R : GetMatchmakingTicket(clientIp) // unnsessary
 N => C : HostGameResponse(gameCode)
 // wooo they joined
-
 
 C => S : GetGameList
 S => C : DummyGames[] [Self, 196], [Self, 197]
@@ -75,7 +72,6 @@ C => N : Join 196
 N => C : HostGame(gameCode)
 N => C : JoinGame(gameCode)
 
-
 C => MM : I want game list
 MM => C : [RandomServer, 196], [RandomServer, 197], [RandomServer, 198], [RandomServer, 199]
 C => R1 : I want 197
@@ -87,7 +83,9 @@ C => AS : I want game 197
 // game 197 has already started, thus the code returns no games, thus AS does not have 197
 AS => C : HostGame(gameCode)
 AS => C : JoinGame(gameCode)
-`;
 
-// just so it's used.
-console.log(str);
+
+
+
+
+*/

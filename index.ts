@@ -1,9 +1,11 @@
 import { Server } from "./lib/server";
 import fs from "fs";
-import redis from "redis";
 
 export interface Config {
-  redis: redis.ClientOpts;
+  /*redis: {
+    host: string;
+    port: 
+  };*/
   server: {
     host: string;
     port: number;
