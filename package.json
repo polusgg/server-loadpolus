@@ -1,14 +1,15 @@
 {
-  "name": "loadpolus_master",
-  "version": "1.0.0",
-  "description": "Load balancer for polus.gg",
+  "name": "loadpolus-master",
+  "version": "4.2.0",
+  "description": "Master load balancer for Polus.gg",
   "main": "index.ts",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "ts-node index",
+    "test": "echo \"lmao\" && exit 69"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/PolusGG/loadpolus.git"
+    "url": "git+https://github.com/PolusGG/loadpolus-master.git"
   },
   "keywords": [
     "uncringe",
@@ -18,9 +19,9 @@
   "author": "Saghetti",
   "license": "ISC",
   "bugs": {
-    "url": "https://github.com/PolusGG/loadpolus/issues"
+    "url": "https://github.com/PolusGG/loadpolus-master/issues"
   },
-  "homepage": "https://github.com/PolusGG/loadpolus#readme",
+  "homepage": "https://github.com/PolusGG/loadpolus-master#readme",
   "devDependencies": {
     "@types/node": "^14.14.22",
     "@typescript-eslint/eslint-plugin": "^4.15.0",

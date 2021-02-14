@@ -1,8 +1,4 @@
-export function scope(...scopes: string[]): string {
-  return scopes.join(".");
-}
 
-/*
 [ Friend Games ]
 Sanae
 Saghetti
@@ -83,9 +79,3 @@ C => AS : I want game 197
 // game 197 has already started, thus the code returns no games, thus AS does not have 197
 AS => C : HostGame(gameCode)
 AS => C : JoinGame(gameCode)
-
-
-
-
-
-*/
