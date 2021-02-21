@@ -1,24 +1,30 @@
-import { BaseRootPacket, GetGameListResponsePacket, HostGameResponsePacket, JoinedGamePacket, JoinGameErrorPacket, RedirectPacket } from "nodepolus/lib/protocol/packets/root";
 import { PacketDestination, RootPacketType } from "nodepolus/lib/protocol/packets/types/enums";
+import { LobbyListing } from "nodepolus/lib/protocol/packets/root/types";
 import { ConnectionInfo, DisconnectReason } from "nodepolus/lib/types";
 import { MessageReader } from "nodepolus/lib/util/hazelMessage";
 import { Connection } from "nodepolus/lib/protocol/connection";
+import { CancelJoinGamePacket } from "./cancelJoinGamePacket";
 import { MaxValue } from "nodepolus/lib/util/constants";
+import { TextComponent } from "nodepolus/lib/api/text";
+import { Level } from "nodepolus/lib/types/enums";
 import { Config } from "./config";
 import Redis from "ioredis";
 import dgram from "dgram";
-import { LobbyListing } from "nodepolus/lib/protocol/packets/root/types";
-import { Level } from "nodepolus/lib/types/enums";
-import { CancelJoinGamePacket } from "./cancelJoinGamePacket";
-import { TextComponent } from "nodepolus/lib/api/text";
+import {
+  BaseRootPacket,
+  GetGameListResponsePacket,
+  HostGameResponsePacket,
+  JoinedGamePacket,
+  RedirectPacket,
+} from "nodepolus/lib/protocol/packets/root";
 
 export class Server {
   private readonly socket = dgram.createSocket("udp4");
   private readonly connections: Map<string, Connection> = new Map();
   private readonly redis: Redis.Redis;
   private readonly gamemodes: string[];
-  private readonly gamemodeReservedCodes: Map<string, string> = new Map();
-  private readonly gamecodeCallbacks: Map<string, (connection: Connection) => void> = new Map([
+  private readonly reservedCodes: Map<string, string> = new Map();
+  private readonly codeCallbacks: Map<string, (connection: Connection) => void> = new Map([
     ["!!!!", (connection: Connection): void => {
       connection.writeReliable(new CancelJoinGamePacket("!!!!"));
     }],
@@ -26,9 +32,11 @@ export class Server {
 
   private connectionIndex = 0;
   private isFetching = false;
-  private gameCache: Record<string, string>[] = [];
+  private lobbyCache: Record<string, string>[] = [];
 
-  constructor(public readonly config: Config) {
+  constructor(
+    public readonly config: Config,
+  ) {
     this.socket.on("message", (buf, remoteInfo) => {
       this.getConnection(ConnectionInfo.fromString(`${remoteInfo.address}:${remoteInfo.port}`)).emit("message", new MessageReader(buf));
     });
@@ -39,12 +47,9 @@ export class Server {
     for (let i = 0; i < this.gamemodes.length; i++) {
       const code = `[]${`${i}`.padStart(2, "0")}`;
 
-      this.gamemodeReservedCodes.set(this.gamemodes[i], code);
-
-      this.gamecodeCallbacks.set(code, this.createMatchmakingFunction(this.gamemodes[i]));
+      this.reservedCodes.set(this.gamemodes[i], code);
+      this.codeCallbacks.set(code, this.createMatchmakingFunction(this.gamemodes[i]));
     }
-
-    console.log("Gamemode code mappings:", this.gamemodeReservedCodes);
 
     setInterval(this.updateGameCache.bind(this), 3000);
   }
@@ -81,46 +86,49 @@ export class Server {
   }
 
   private handleMatchmaking(gamemode: string, connection: Connection): void {
-    console.log(gamemode);
+    const results = this.lobbyCache.filter(game => {
+      if (game.public !== "true") {
+        return false;
+      }
 
-    // try to find a game
-    let results = this.gameCache.filter(game => (game.public === "true"));
+      if (game.gamemode !== gamemode) {
+        return false;
+      }
 
-    // this doesn't deal with map/impostor/language filtering
-    results = results.filter(game => game.gamemode == gamemode);
-    results = results.filter(game => parseInt(game.currentPlayers, 10) < parseInt(game.maxPlayers, 10));
-    results = results.filter(game => game.gameState == "NotStarted");
+      if (parseInt(game.currentPlayers, 10) >= parseInt(game.maxPlayers, 10)) {
+        return false;
+      }
+
+      if (game.gameState !== "NotStarted") {
+        return false;
+      }
+
+      return true;
+    });
 
     if (results.length < 1) {
-      connection.writeReliable(new JoinGameErrorPacket(DisconnectReason.custom(
+      connection.disconnect(DisconnectReason.custom(
         `Could not find a public ${gamemode} game for you to join.\nWhy not host your own game?`,
-      )));
+      ));
 
       return;
     }
 
-    results = results.sort((a, b) => parseInt(a.currentPlayers, 10) - parseInt(b.currentPlayers, 10));
-
-    const targetGame = results[results.length - 1];
+    const lobby = results.sort((a, b) => parseInt(a.currentPlayers, 10) - parseInt(b.currentPlayers, 10))[results.length - 1];
 
     connection.sendReliable([
-      new HostGameResponsePacket(targetGame.code),
-      new RedirectPacket(targetGame.host, parseInt(targetGame.port, 10)),
+      new HostGameResponsePacket(lobby.code),
+      new RedirectPacket(lobby.host, parseInt(lobby.port, 10)),
     ]);
   }
 
-  private createMatchmakingFunction(gm: string): (connection: Connection) => void {
+  private createMatchmakingFunction(gamemode: string): (connection: Connection) => void {
     return ((connection: Connection): void => {
-      // capture gamemode
-      const gamemode = gm;
-
       this.handleMatchmaking(gamemode, connection);
     }).bind(this);
   }
 
   private async updateGameCache(): Promise<void> {
-    // this is a expensive operation, possibly requiring thousands of redis calls
-
     if (this.isFetching) {
       return;
     }
@@ -128,61 +136,53 @@ export class Server {
     this.isFetching = true;
 
     try {
-      const tempGameCache: Record<string, string>[] = [];
-
-      // get nodes
+      // Get all nodes
       const nodes = await this.redis.smembers("loadpolus.nodes");
-
-      // get all games on the network using a pipeline
-      const gameListPipeline = this.redis.pipeline();
-      let gameCodes: string[] = [];
+      // Get all lobbies
+      const listPipeline = this.redis.pipeline();
+      const tempCache: Record<string, string>[] = [];
+      const codes: string[] = [];
 
       for (let i = 0; i < nodes.length; i++) {
         const currentNode = nodes[i];
 
-        gameListPipeline.smembers(`loadpolus.node.${currentNode}.games`);
+        listPipeline.smembers(`loadpolus.node.${currentNode}.lobbies`);
       }
 
-      const gameListPipelineResults = await gameListPipeline.exec();
+      const listResults = await listPipeline.exec();
 
-      for (let i = 0; i < gameListPipelineResults.length; i++) {
-        const pipelineResult = gameListPipelineResults[i];
+      for (let i = 0; i < listResults.length; i++) {
+        const result = listResults[i];
 
-        if (pipelineResult[0] !== null) {
-          // error while fetching these games
+        if (result[0] !== null) {
           continue;
         }
 
-        const gamesForNode = pipelineResult[1] as string[];
-
-        for (let j = 0; j < gamesForNode.length; j++) {
-          gameCodes = Array.prototype.concat(gameCodes, gamesForNode);
-        }
+        codes.push(...(result[1] as string[]));
       }
 
-      // get all data for all games using a second pipeline
-      const gameDataPipeline = this.redis.pipeline();
+      // Get every selected lobby
+      const lobbyPipeline = this.redis.pipeline();
 
-      for (let i = 0; i < gameCodes.length; i++) {
-        gameDataPipeline.hgetall(`loadpolus.lobby.${gameCodes[i]}`);
+      for (let i = 0; i < codes.length; i++) {
+        lobbyPipeline.hgetall(`loadpolus.lobby.${codes[i]}`);
       }
 
-      const gameDataPipelineResults = await gameDataPipeline.exec();
+      const lobbyResults = await lobbyPipeline.exec();
 
-      for (let i = 0; i < gameDataPipelineResults.length; i++) {
-        const pipelineResult = gameDataPipelineResults[i];
+      for (let i = 0; i < lobbyResults.length; i++) {
+        const result = lobbyResults[i];
 
-        if (pipelineResult[0] !== null) {
-          // error while fetching this game
+        if (result[0] !== null) {
           continue;
         }
 
-        pipelineResult[1].code = gameCodes[i];
+        result[1].code = codes[i];
 
-        tempGameCache.push(pipelineResult[1]);
+        tempCache.push(result[1]);
       }
 
-      this.gameCache = tempGameCache;
+      this.lobbyCache = tempCache;
     } finally {
       this.isFetching = false;
     }
@@ -191,18 +191,24 @@ export class Server {
   private async fetchNodes(): Promise<Map<string, Record<string, string>>> {
     const availableNodes = await this.redis.smembers("loadpolus.nodes");
     const nodeData = new Map<string, Record<string, string>>();
-    const nodeFetchPipeline = this.redis.pipeline();
+    const nodePipeline = this.redis.pipeline();
 
     for (let i = 0; i < availableNodes.length; i++) {
       const node = availableNodes[i];
 
-      nodeFetchPipeline.hgetall(`loadpolus.node.${node}`);
+      nodePipeline.hgetall(`loadpolus.node.${node}`);
     }
 
-    const results = await nodeFetchPipeline.exec();
+    const nodeResults = await nodePipeline.exec();
 
-    for (let i = 0; i < results.length; i++) {
-      nodeData.set(availableNodes[i], results[i][1]);
+    for (let i = 0; i < nodeResults.length; i++) {
+      const result = nodeResults[i];
+
+      if (result[0] !== null) {
+        continue;
+      }
+
+      nodeData.set(availableNodes[i], result[1]);
     }
 
     return nodeData;
@@ -219,30 +225,25 @@ export class Server {
             continue;
           }
 
-          const currentNodePlayerCount = parseInt(node[1].currentConnections, 10);
+          const players = parseInt(node[1].currentConnections, 10);
 
-          if (currentNodePlayerCount >= parseInt(node[1].maxConnections, 10)) {
-            // ignore full nodes
+          if (players >= parseInt(node[1].maxConnections, 10)) {
             continue;
           }
 
           if (best === undefined) {
-            // we have made it past all the prev checks without getting a node
-            // node[0] is good, use it for further comparisons
-            // this is placed here because the next operation required nodeData.get(best)
             best = node[0];
+
             continue;
           }
 
-          if (currentNodePlayerCount < parseInt(nodeData.get(best!)!.currentConnections, 10)) {
+          if (players < parseInt(nodeData.get(best!)!.currentConnections, 10)) {
             best = node[0];
           }
         }
 
         if (best === undefined) {
-          sender.sendReliable([new JoinGameErrorPacket(DisconnectReason.custom(
-            "There are no servers currently available. Please try again later.",
-          ))]);
+          sender.disconnect(DisconnectReason.custom("There are no servers currently available. Please try again later."));
 
           return;
         }
@@ -253,14 +254,14 @@ export class Server {
           bestData.host,
           parseInt(bestData.port, 10),
         )]);
-
         break;
       }
       case RootPacketType.JoinGame: {
         const joinedGamePacket = packet as JoinedGamePacket;
+        const callback = this.codeCallbacks.get(joinedGamePacket.lobbyCode);
 
-        if (this.gamecodeCallbacks.has(joinedGamePacket.lobbyCode)) {
-          this.gamecodeCallbacks.get(joinedGamePacket.lobbyCode)!(sender);
+        if (callback !== undefined) {
+          callback(sender);
 
           return;
         }
@@ -268,7 +269,7 @@ export class Server {
         const lobbyData = await this.redis.hgetall(`loadpolus.lobby.${joinedGamePacket.lobbyCode}`);
 
         if (Object.keys(lobbyData).length < 1) {
-          sender.sendReliable([new JoinGameErrorPacket(DisconnectReason.gameNotFound())]);
+          sender.disconnect(DisconnectReason.gameNotFound());
 
           return;
         }
@@ -277,44 +278,21 @@ export class Server {
           lobbyData.host,
           parseInt(lobbyData.port, 10),
         )]);
-
         break;
       }
       case RootPacketType.GetGameList: {
-        // layout looks like this:
-        /*
-         * [ Public ]
-         * gamemodes here
-         */
-
         const listings: LobbyListing[] = new Array(this.gamemodes.length + 1);
-        //const nodeData = await this.fetchNodes();
-        //const values = [...nodeData.values()];
 
         for (let i = 0; i < listings.length; i++) {
           if (i == 0) {
-            // write [ Public ] header
             listings[i] = this.makeListing("!!!!", new TextComponent().add("[ Public ]").toString());
 
             continue;
           }
 
-          const currentGamemode = this.gamemodes[i - 1];
-          //const randomNode = values[Math.floor(Math.random() * values.length)];
+          const gamemode = this.gamemodes[i - 1];
 
-          listings[i] = this.makeListing(this.gamemodeReservedCodes.get(currentGamemode)!, currentGamemode);
-
-          /*new LobbyListing(
-            randomNode.host,
-            parseInt(randomNode.port, 10),
-            this.gamemodeReservedCodes.get(currentGamemode)!,
-            currentGamemode,
-            0,
-            0,
-            Level.TheSkeld,
-            0,
-            0,
-          );*/
+          listings[i] = this.makeListing(this.reservedCodes.get(gamemode)!, gamemode);
         }
 
         sender.writeReliable(new GetGameListResponsePacket(listings));
@@ -339,12 +317,8 @@ export class Server {
 
     newConnection.id = this.getNextConnectionId();
 
-    //console.log("Initialized connection", newConnection.id);
-
     newConnection.on("packet", async (packet: BaseRootPacket) => {
-      if (!packet.isCancelled) {
-        await this.handlePacket(packet, newConnection);
-      }
+      await this.handlePacket(packet, newConnection);
     });
 
     newConnection.once("disconnected").then(() => {

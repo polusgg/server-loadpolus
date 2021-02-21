@@ -13,6 +13,10 @@ export class CancelJoinGamePacket extends BaseRootPacket {
     super(RootPacketType.JoinedGame);
   }
 
+  clone(): CancelJoinGamePacket {
+    return new CancelJoinGamePacket(this.lobbyCode);
+  }
+
   serialize(): MessageWriter {
     return new MessageWriter()
       .writeInt32(LobbyCode.encode(this.lobbyCode))
