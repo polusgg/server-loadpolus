@@ -19,8 +19,7 @@ export class Server {
   private readonly gamemodes: string[];
   private readonly gamemodeReservedCodes: Map<string, string> = new Map();
   private readonly gamecodeCallbacks: Map<string, (connection: Connection) => void> = new Map([
-    // eslint-disable-next-line @typescript-eslint/require-await
-    ["!!!!", async (connection: Connection): Promise<void> => {
+    ["!!!!", (connection: Connection): void => {
       connection.writeReliable(new CancelJoinGamePacket("!!!!"));
     }],
   ]);
