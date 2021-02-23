@@ -1,12 +1,10 @@
-import { PacketDestination, RootPacketType } from "nodepolus/lib/protocol/packets/types/enums";
-import { LobbyListing } from "nodepolus/lib/protocol/packets/root/types";
-import { ConnectionInfo, DisconnectReason } from "nodepolus/lib/types";
+import { Level, PacketDestination, RootPacketType } from "nodepolus/lib/types/enums";
+import { ConnectionInfo, DisconnectReason, LobbyListing } from "nodepolus/lib/types";
 import { MessageReader } from "nodepolus/lib/util/hazelMessage";
 import { Connection } from "nodepolus/lib/protocol/connection";
 import { CancelJoinGamePacket } from "./cancelJoinGamePacket";
 import { MaxValue } from "nodepolus/lib/util/constants";
 import { TextComponent } from "nodepolus/lib/api/text";
-import { Level } from "nodepolus/lib/types/enums";
 import { Config } from "./config";
 import Redis from "ioredis";
 import dgram from "dgram";
@@ -215,7 +213,7 @@ export class Server {
   }
 
   private async handlePacket(packet: BaseRootPacket, sender: Connection): Promise<void> {
-    switch (packet.type) {
+    switch (packet.getType()) {
       case RootPacketType.HostGame: {
         const nodeData = await this.fetchNodes();
         let best: string | undefined;
