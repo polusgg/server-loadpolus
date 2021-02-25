@@ -1,6 +1,7 @@
 import { BaseRootPacket } from "nodepolus/lib/protocol/packets/root";
 import { RootPacketType } from "nodepolus/lib/types/enums";
 import { MessageWriter } from "nodepolus/lib/util/hazelMessage";
+import { RootPacketType } from "nodepolus/lib/types/enums";
 import { LobbyCode } from "nodepolus/lib/util/lobbyCode";
 
 /**
