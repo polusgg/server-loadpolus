@@ -26,7 +26,6 @@ export class Server {
     ["!!!!", (connection: Connection): void => {
       connection.writeReliable(new CancelJoinGamePacket("!!!!"));
     }],
-    ["AMOGUS", (connection: Connection): void => connection.disconnect(DisconnectReason.custom("lookin real sussy"))]
   ]);
 
   private connectionIndex = 0;
@@ -59,27 +58,18 @@ export class Server {
     });
   }
 
-  getConnection(connectionInfo: string | ConnectionInfo): Connection {
-    let info: ConnectionInfo;
-    let identifier: string;
-
-    if (typeof connectionInfo != "string") {
-      info = connectionInfo;
-      identifier = info.toString();
-    } else {
-      info = ConnectionInfo.fromString(connectionInfo);
-      identifier = connectionInfo;
-    }
-
+  getConnection(connectionInfo: ConnectionInfo): Connection {
+    const identifier = connectionInfo.toString();
     let connection = this.connections.get(identifier);
 
     if (connection) {
       return connection;
     }
 
-    connection = this.initializeConnection(info);
-
-    this.connections.set(identifier, connection);
+    this.connections.set(
+      identifier,
+      connection = this.initializeConnection(connectionInfo),
+    );
 
     return connection;
   }
@@ -106,9 +96,7 @@ export class Server {
     });
 
     if (results.length < 1) {
-      connection.disconnect(DisconnectReason.custom(
-        `Could not find a public ${gamemode} game for you to join.\nWhy not host your own game?`,
-      ));
+      connection.disconnect(DisconnectReason.custom(`Could not find a public ${gamemode} game for you to join.\nWhy not host your own?`));
 
       return;
     }
@@ -189,11 +177,11 @@ export class Server {
 
   private async fetchNodes(): Promise<Map<string, Record<string, string>>> {
     let availableNodes: string[];
-    
+
     try {
       availableNodes = await this.redis.smembers("loadpolus.nodes");
-    } catch (e) {
-      return Promise.reject(e);
+    } catch (error) {
+      return Promise.reject(error);
     }
 
     const nodeData = new Map<string, Record<string, string>>();
@@ -205,12 +193,13 @@ export class Server {
       nodePipeline.hgetall(`loadpolus.node.${node}`);
     }
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let nodeResults: [Error | null, any][];
 
     try {
       nodeResults = await nodePipeline.exec();
-    } catch (e) {
-      return Promise.reject(e);
+    } catch (error) {
+      return Promise.reject(error);
     }
 
     for (let i = 0; i < nodeResults.length; i++) {
@@ -230,7 +219,8 @@ export class Server {
     switch (packet.getType()) {
       case RootPacketType.HostGame: {
         if (this.redis.status != "ready") {
-          sender.disconnect(DisconnectReason.custom("Error while hosting game: Redis is offline. Please try again later.\nIf this error persists, contact polus.gg staff."));
+          sender.disconnect(DisconnectReason.custom("An error occured while creating your game, and the developers have been notified.\n\nPlease try again."));
+
           return;
         }
 
@@ -261,24 +251,20 @@ export class Server {
         }
 
         if (best === undefined) {
-          sender.disconnect(DisconnectReason.custom("There are no servers currently available. Please try again later."));
+          sender.disconnect(DisconnectReason.custom("There are no servers currently available.\n\nPlease try again later."));
 
           return;
         }
 
         const bestData = nodeData.get(best)!;
 
-        console.log("Connection ID", sender.id, "hosting game on server", bestData.host);
-
-        sender.sendReliable([new RedirectPacket(
-          bestData.host,
-          parseInt(bestData.port, 10),
-        )]);
+        sender.sendReliable([new RedirectPacket(bestData.host, parseInt(bestData.port, 10))]);
         break;
       }
       case RootPacketType.JoinGame: {
         if (this.redis.status != "ready") {
-          sender.disconnect(DisconnectReason.custom("Error while joining game: Redis is offline. Please try again later.\nIf this error persists, contact polus.gg staff."));
+          sender.disconnect(DisconnectReason.custom("An error occured while joining the game, and the developers have been notified.\n\nPlease try again."));
+
           return;
         }
 
@@ -286,7 +272,6 @@ export class Server {
         const callback = this.codeCallbacks.get(joinedGamePacket.lobbyCode);
 
         if (callback !== undefined) {
-          console.log("Connection ID", sender.id, "joining game", joinedGamePacket.lobbyCode, "handled by callback")
           callback(sender);
 
           return;
@@ -296,12 +281,9 @@ export class Server {
 
         if (Object.keys(lobbyData).length < 1) {
           sender.disconnect(DisconnectReason.gameNotFound());
-          console.log("Connection ID", sender.id, "joining non-existent game", joinedGamePacket.lobbyCode);
 
           return;
         }
-
-        console.log("Connection ID", sender.id, "joining game", joinedGamePacket.lobbyCode, "on server", lobbyData.host);
 
         sender.sendReliable([new RedirectPacket(
           lobbyData.host,
@@ -311,7 +293,8 @@ export class Server {
       }
       case RootPacketType.GetGameList: {
         if (this.redis.status != "ready") {
-          sender.disconnect(DisconnectReason.custom("Error while fetching games: Redis is offline. Please try again later.\nIf this error persists, contact polus.gg staff."));
+          sender.disconnect(DisconnectReason.custom("An error occured while searching for games, and the developers have been notified.\n\nPlease try again."));
+
           return;
         }
 
@@ -349,16 +332,13 @@ export class Server {
   private initializeConnection(connectionInfo: ConnectionInfo): Connection {
     const newConnection = new Connection(connectionInfo, this.socket, PacketDestination.Client);
 
-    newConnection.id = this.getNextConnectionId();
-
-    console.log("Accepted connection ID", newConnection.id, "from address", connectionInfo.toString())
+    newConnection.setId(this.getNextConnectionId());
 
     newConnection.on("packet", async (packet: BaseRootPacket) => {
       try {
         await this.handlePacket(packet, newConnection);
-      } catch (e) {
-        console.log("Unhandled error in packet handler:", e);
-        newConnection.disconnect(DisconnectReason.custom(`An unhandled error occurred! Please report this to a polus.gg dev.\nDetails: ${e}`));
+      } catch (error) {
+        newConnection.disconnect(DisconnectReason.custom("An error occured while searching for games, and the developers have been notified.\n\nPlease try again."));
       }
     });
 
@@ -370,7 +350,6 @@ export class Server {
   }
 
   private handleDisconnect(connection: Connection): void {
-    console.log("Connection ID", connection.id, "disconnected");
     this.connections.delete(connection.getConnectionInfo().toString());
   }
 
