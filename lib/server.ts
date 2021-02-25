@@ -1,12 +1,10 @@
-import { PacketDestination, RootPacketType } from "nodepolus/lib/protocol/packets/types/enums";
-import { LobbyListing } from "nodepolus/lib/protocol/packets/root/types";
-import { ConnectionInfo, DisconnectReason } from "nodepolus/lib/types";
+import { Level, PacketDestination, RootPacketType } from "nodepolus/lib/types/enums";
+import { ConnectionInfo, DisconnectReason, LobbyListing } from "nodepolus/lib/types";
 import { MessageReader } from "nodepolus/lib/util/hazelMessage";
 import { Connection } from "nodepolus/lib/protocol/connection";
 import { CancelJoinGamePacket } from "./cancelJoinGamePacket";
 import { MaxValue } from "nodepolus/lib/util/constants";
 import { TextComponent } from "nodepolus/lib/api/text";
-import { Level } from "nodepolus/lib/types/enums";
 import { Config } from "./config";
 import Redis from "ioredis";
 import dgram from "dgram";
@@ -28,6 +26,7 @@ export class Server {
     ["!!!!", (connection: Connection): void => {
       connection.writeReliable(new CancelJoinGamePacket("!!!!"));
     }],
+    ["AMOGUS", (connection: Connection): void => connection.disconnect(DisconnectReason.custom("lookin real sussy"))]
   ]);
 
   private connectionIndex = 0;
@@ -189,7 +188,14 @@ export class Server {
   }
 
   private async fetchNodes(): Promise<Map<string, Record<string, string>>> {
-    const availableNodes = await this.redis.smembers("loadpolus.nodes");
+    let availableNodes: string[];
+    
+    try {
+      availableNodes = await this.redis.smembers("loadpolus.nodes");
+    } catch (e) {
+      return Promise.reject(e);
+    }
+
     const nodeData = new Map<string, Record<string, string>>();
     const nodePipeline = this.redis.pipeline();
 
@@ -199,7 +205,13 @@ export class Server {
       nodePipeline.hgetall(`loadpolus.node.${node}`);
     }
 
-    const nodeResults = await nodePipeline.exec();
+    let nodeResults: [Error | null, any][];
+
+    try {
+      nodeResults = await nodePipeline.exec();
+    } catch (e) {
+      return Promise.reject(e);
+    }
 
     for (let i = 0; i < nodeResults.length; i++) {
       const result = nodeResults[i];
@@ -215,9 +227,15 @@ export class Server {
   }
 
   private async handlePacket(packet: BaseRootPacket, sender: Connection): Promise<void> {
-    switch (packet.type) {
+    switch (packet.getType()) {
       case RootPacketType.HostGame: {
+        if (this.redis.status != "ready") {
+          sender.disconnect(DisconnectReason.custom("Error while hosting game: Redis is offline. Please try again later.\nIf this error persists, contact polus.gg staff."));
+          return;
+        }
+
         const nodeData = await this.fetchNodes();
+
         let best: string | undefined;
 
         for (const node of nodeData) {
@@ -250,6 +268,8 @@ export class Server {
 
         const bestData = nodeData.get(best)!;
 
+        console.log("Connection ID", sender.id, "hosting game on server", bestData.host);
+
         sender.sendReliable([new RedirectPacket(
           bestData.host,
           parseInt(bestData.port, 10),
@@ -257,10 +277,16 @@ export class Server {
         break;
       }
       case RootPacketType.JoinGame: {
+        if (this.redis.status != "ready") {
+          sender.disconnect(DisconnectReason.custom("Error while joining game: Redis is offline. Please try again later.\nIf this error persists, contact polus.gg staff."));
+          return;
+        }
+
         const joinedGamePacket = packet as JoinedGamePacket;
         const callback = this.codeCallbacks.get(joinedGamePacket.lobbyCode);
 
         if (callback !== undefined) {
+          console.log("Connection ID", sender.id, "joining game", joinedGamePacket.lobbyCode, "handled by callback")
           callback(sender);
 
           return;
@@ -270,9 +296,12 @@ export class Server {
 
         if (Object.keys(lobbyData).length < 1) {
           sender.disconnect(DisconnectReason.gameNotFound());
+          console.log("Connection ID", sender.id, "joining non-existent game", joinedGamePacket.lobbyCode);
 
           return;
         }
+
+        console.log("Connection ID", sender.id, "joining game", joinedGamePacket.lobbyCode, "on server", lobbyData.host);
 
         sender.sendReliable([new RedirectPacket(
           lobbyData.host,
@@ -281,6 +310,11 @@ export class Server {
         break;
       }
       case RootPacketType.GetGameList: {
+        if (this.redis.status != "ready") {
+          sender.disconnect(DisconnectReason.custom("Error while fetching games: Redis is offline. Please try again later.\nIf this error persists, contact polus.gg staff."));
+          return;
+        }
+
         const listings: LobbyListing[] = new Array(this.gamemodes.length + 1);
 
         for (let i = 0; i < listings.length; i++) {
@@ -317,8 +351,15 @@ export class Server {
 
     newConnection.id = this.getNextConnectionId();
 
+    console.log("Accepted connection ID", newConnection.id, "from address", connectionInfo.toString())
+
     newConnection.on("packet", async (packet: BaseRootPacket) => {
-      await this.handlePacket(packet, newConnection);
+      try {
+        await this.handlePacket(packet, newConnection);
+      } catch (e) {
+        console.log("Unhandled error in packet handler:", e);
+        newConnection.disconnect(DisconnectReason.custom(`An unhandled error occurred! Please report this to a polus.gg dev.\nDetails: ${e}`));
+      }
     });
 
     newConnection.once("disconnected").then(() => {
@@ -329,6 +370,7 @@ export class Server {
   }
 
   private handleDisconnect(connection: Connection): void {
+    console.log("Connection ID", connection.id, "disconnected");
     this.connections.delete(connection.getConnectionInfo().toString());
   }
 
