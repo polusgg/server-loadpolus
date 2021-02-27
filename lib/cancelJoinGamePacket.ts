@@ -1,7 +1,6 @@
 import { BaseRootPacket } from "nodepolus/lib/protocol/packets/root";
 import { RootPacketType } from "nodepolus/lib/types/enums";
 import { MessageWriter } from "nodepolus/lib/util/hazelMessage";
-import { RootPacketType } from "nodepolus/lib/types/enums";
 import { LobbyCode } from "nodepolus/lib/util/lobbyCode";
 
 /**
@@ -18,9 +17,8 @@ export class CancelJoinGamePacket extends BaseRootPacket {
     return new CancelJoinGamePacket(this.lobbyCode);
   }
 
-  serialize(): MessageWriter {
-    return new MessageWriter()
-      .writeInt32(LobbyCode.encode(this.lobbyCode))
+  serialize(writer: MessageWriter): void {
+    writer.writeInt32(LobbyCode.encode(this.lobbyCode))
       .writePackedInt32(0)
       .writePackedInt32(0)
       .writeList([], (sub, id) => sub.writePackedInt32(id));
