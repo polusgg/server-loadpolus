@@ -1,10 +1,10 @@
-import { Level, PacketDestination, RootPacketType } from "nodepolus/lib/types/enums";
-import { ConnectionInfo, DisconnectReason, LobbyListing } from "nodepolus/lib/types";
-import { MessageReader } from "nodepolus/lib/util/hazelMessage";
-import { Connection } from "nodepolus/lib/protocol/connection";
+import { Level, PacketDestination, RootPacketType } from "@nodepolus/nodepolus/lib/types/enums";
+import { ConnectionInfo, DisconnectReason, LobbyListing } from "@nodepolus/nodepolus/lib/types";
+import { MessageReader } from "@nodepolus/nodepolus/lib/util/hazelMessage";
+import { Connection } from "@nodepolus/nodepolus/lib/protocol/connection";
 import { CancelJoinGamePacket } from "./cancelJoinGamePacket";
-import { MaxValue } from "nodepolus/lib/util/constants";
-import { TextComponent } from "nodepolus/lib/api/text";
+import { MaxValue } from "@nodepolus/nodepolus/lib/util/constants";
+import { TextComponent } from "@nodepolus/nodepolus/lib/api/text";
 import { Config } from "./config";
 import Redis from "ioredis";
 import dgram from "dgram";
@@ -14,7 +14,7 @@ import {
   HostGameResponsePacket,
   JoinedGamePacket,
   RedirectPacket,
-} from "nodepolus/lib/protocol/packets/root";
+} from "@nodepolus/nodepolus/lib/protocol/packets/root";
 
 export class Server {
   private readonly socket = dgram.createSocket("udp4");
@@ -70,7 +70,7 @@ export class Server {
       identifier,
       connection = this.initializeConnection(connectionInfo),
     );
-
+ 
     return connection;
   }
 
