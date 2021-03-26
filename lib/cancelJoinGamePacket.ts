@@ -1,7 +1,7 @@
-import { BaseRootPacket } from "@nodepolus/nodepolus/lib/protocol/packets/root";
-import { RootPacketType } from "@nodepolus/nodepolus/lib/types/enums";
-import { MessageWriter } from "@nodepolus/nodepolus/lib/util/hazelMessage";
-import { LobbyCode } from "@nodepolus/nodepolus/lib/util/lobbyCode";
+import { BaseRootPacket } from "@nodepolus/framework/src/protocol/packets/root";
+import { RootPacketType } from "@nodepolus/framework/src/types/enums";
+import { MessageWriter } from "@nodepolus/framework/src/util/hazelMessage";
+import { LobbyCode } from "@nodepolus/framework/src/util/lobbyCode";
 
 /**
  * Root Packet ID: `0x07` (`7`)
