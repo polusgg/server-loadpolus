@@ -1,21 +1,21 @@
 {
-  "name": "server-loadpolus",
-  "version": "0.0.1",
-  "description": "Load balancer master server for Polus.gg",
+  "name": "@polusgg/server-loadpolus",
+  "version": "1.0.0",
+  "description": "Load balancer master server",
   "main": "bin/index.ts",
   "scripts": {
     "start": "ts-node bin/index"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/PolusGG/loadpolus-master.git"
+    "url": "git+https://github.com/polusgg/server-loadpolus.git"
   },
-  "author": "Saghetti",
+  "author": "Polus.gg",
   "license": "ISC",
   "bugs": {
-    "url": "https://github.com/PolusGG/loadpolus-master/issues"
+    "url": "https://github.com/polusgg/server-loadpolus/issues"
   },
-  "homepage": "https://github.com/PolusGG/loadpolus-master",
+  "homepage": "https://github.com/polusgg/server-loadpolus",
   "dependencies": {
     "@nodepolus/framework": "latest",
     "ioredis": "^4.22.0",
