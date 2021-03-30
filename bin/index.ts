@@ -10,6 +10,7 @@ import path from "path";
  */
 async function loadConfig(configPath: string = path.join(__dirname, "config.json")): Promise<Config> {
   console.log("Loading config.json");
+
   return JSON.parse(await fs.readFile(configPath, "utf-8"));
 }
 
@@ -24,4 +25,3 @@ async function loadConfig(configPath: string = path.join(__dirname, "config.json
     process.exit(1);
   }
 })();
-

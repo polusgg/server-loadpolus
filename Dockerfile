@@ -9,6 +9,12 @@ EXPOSE 22023/udp \
 
 ENV NODE_ENV=development
 
+ENV NP_REDIS_PORT \
+    NP_DROPLET_PORT \
+    NP_REDIS_HOST \
+    NP_REDIS_PASSWORD \
+    NP_DROPLET_ADDRESS
+
 COPY --chown=node:node .npmrc_docker \
                        ./.npmrc
 COPY --chown=node:node package.json \

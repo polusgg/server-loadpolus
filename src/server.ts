@@ -39,6 +39,15 @@ export class Server {
       this.getConnection(ConnectionInfo.fromString(`${remoteInfo.address}:${remoteInfo.port}`)).emit("message", new MessageReader(buf));
     });
 
+    const redisPort = parseInt(process.env.NP_REDIS_PORT ?? "", 10);
+    const port = parseInt(process.env.NP_DROPLET_PORT ?? "", 10);
+
+    config.redis.host = process.env.NP_REDIS_HOST?.trim() ?? config.redis.host;
+    config.redis.port = Number.isInteger(redisPort) ? redisPort : config.redis.port;
+    config.redis.password = process.env.NP_REDIS_PASSWORD?.trim() ?? undefined;
+    config.server.port = Number.isInteger(port) ? port : config.server.port;
+    config.server.publicIp = process.env.NP_DROPLET_ADDRESS?.trim() ?? config.server.publicIp;
+
     this.redis = new Redis(config.redis);
     this.gamemodes = ["foo", "bar", ""];
 
@@ -70,7 +79,7 @@ export class Server {
       identifier,
       connection = this.initializeConnection(connectionInfo),
     );
- 
+
     return connection;
   }
 
