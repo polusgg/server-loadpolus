@@ -23,7 +23,6 @@ COPY --chown=node:node package.json \
                        ./
 COPY --chown=node:node bin \
                        ./bin
-
 COPY --chown=node:node src \
                        ./src
 
