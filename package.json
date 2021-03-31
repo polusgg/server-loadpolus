@@ -1,6 +1,6 @@
 {
   "name": "@polusgg/server-loadpolus",
-  "version": "1.0.1-4",
+  "version": "1.0.1-5",
   "description": "Load balancer master server",
   "main": "bin/index.ts",
   "scripts": {
