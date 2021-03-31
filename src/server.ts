@@ -66,6 +66,8 @@ export class Server {
       this.codeCallbacks.set(code, this.createMatchmakingFunction(this.gamemodes[i]));
     }
 
+    this.redis.on("connect", () => console.log(`Redis connected to ${config.redis.host}:${config.redis.port}`));
+
     setInterval(this.updateGameCache.bind(this), 3000);
   }
 
