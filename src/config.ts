@@ -5,6 +5,7 @@ export type Config = {
     host: string;
     port: number;
     publicIp: string;
+    name: string;
   };
   redis: Redis.RedisOptions;
 };

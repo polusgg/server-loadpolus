@@ -8,6 +8,7 @@ import { TextComponent } from "@nodepolus/framework/src/api/text";
 import { Config } from "./config";
 import Redis from "ioredis";
 import dgram from "dgram";
+import os from "os";
 import {
   BaseRootPacket,
   GetGameListResponsePacket,
@@ -47,6 +48,7 @@ export class Server {
     config.redis.password = process.env.NP_REDIS_PASSWORD?.trim() ?? undefined;
     config.server.port = Number.isInteger(port) ? port : config.server.port;
     config.server.publicIp = process.env.NP_DROPLET_ADDRESS?.trim() ?? config.server.publicIp;
+    config.server.name = os.hostname();
 
     this.redis = new Redis(config.redis);
     this.gamemodes = ["foo", "bar", ""];
