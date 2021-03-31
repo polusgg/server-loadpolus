@@ -50,6 +50,12 @@ export class Server {
     config.server.publicIp = process.env.NP_DROPLET_ADDRESS?.trim() ?? config.server.publicIp;
     config.server.name = os.hostname();
 
+    if (config.redis.host?.startsWith("rediss://")) {
+      config.redis.host = config.redis.host.substr("rediss://".length);
+      config.redis.tls = {};
+      config.redis.connectTimeout = 30000;
+    }
+
     this.redis = new Redis(config.redis);
     this.gamemodes = ["foo", "bar", ""];
 
