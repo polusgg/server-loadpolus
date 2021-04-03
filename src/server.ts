@@ -46,6 +46,7 @@ export class Server {
     config.redis.host = process.env.NP_REDIS_HOST?.trim() ?? config.redis.host;
     config.redis.port = Number.isInteger(redisPort) ? redisPort : config.redis.port;
     config.redis.password = process.env.NP_REDIS_PASSWORD?.trim() ?? undefined;
+    config.server.host = process.env.NP_DROPLET_BIND_ADDRESS?.trim() ?? config.server.host;
     config.server.port = Number.isInteger(port) ? port : config.server.port;
     config.server.publicIp = process.env.NP_DROPLET_ADDRESS?.trim() ?? config.server.publicIp;
     config.server.name = os.hostname();
