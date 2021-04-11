@@ -8,4 +8,5 @@ export type Config = {
     name: string;
   };
   redis: Redis.RedisOptions;
+  debug: boolean;
 };

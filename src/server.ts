@@ -25,7 +25,7 @@ export class Server {
   private readonly reservedCodes: Map<string, string> = new Map();
   private readonly codeCallbacks: Map<string, (connection: Connection) => void> = new Map([
     ["!!!!", (connection: Connection): void => {
-      connection.writeReliable(new CancelJoinGamePacket("!!!!"));
+      connection.sendReliable([new CancelJoinGamePacket("!!!!")]);
     }],
   ]);
 
@@ -50,6 +50,7 @@ export class Server {
     config.server.port = Number.isInteger(port) ? port : config.server.port;
     config.server.publicIp = process.env.NP_DROPLET_ADDRESS?.trim() ?? config.server.publicIp;
     config.server.name = os.hostname();
+    config.debug = process.env.NP_LOG_DEBUG?.trim() === "true";
 
     if (config.redis.host?.startsWith("rediss://")) {
       config.redis.host = config.redis.host.substr("rediss://".length);
@@ -95,6 +96,8 @@ export class Server {
   }
 
   private handleMatchmaking(gamemode: string, connection: Connection): void {
+    this.debugLog("handleMatchmaking() invoked", gamemode, connection);
+
     const results = this.lobbyCache.filter(game => {
       if (game.public !== "true") {
         return false;
@@ -136,7 +139,11 @@ export class Server {
   }
 
   private async updateGameCache(): Promise<void> {
+    //this.debugLog("updateGameCache() invoked");
+
     if (this.isFetching) {
+      this.debugLog("updateGameCache() cancelled due to this.isFetching");
+
       return;
     }
 
@@ -193,6 +200,8 @@ export class Server {
     } finally {
       this.isFetching = false;
     }
+
+    //this.debugLog("updateGameCache() results", this.lobbyCache);
   }
 
   private async fetchNodes(): Promise<Map<string, Record<string, string>>> {
@@ -236,41 +245,55 @@ export class Server {
   }
 
   private async handlePacket(packet: BaseRootPacket, sender: Connection): Promise<void> {
+    this.debugLog("handlePacket() invoked", packet, sender);
+
     switch (packet.getType()) {
       case RootPacketType.HostGame: {
         if (this.redis.status != "ready") {
           sender.disconnect(DisconnectReason.custom("An error occured while creating your game, and the developers have been notified.\n\nPlease try again."));
+          this.debugLog("drop player due to this.redis.status");
 
           return;
         }
 
+        this.debugLog("got to HostGame");
+
         const nodeData = await this.fetchNodes();
+
+        this.debugLog("available nodes:", nodeData);
 
         let best: string | undefined;
 
         for (const node of nodeData) {
           if (node[1].maintenance === "true") {
+            this.debugLog("skip node due to maintenance", node);
+
             continue;
           }
 
           const players = parseInt(node[1].currentConnections, 10);
 
           if (players >= parseInt(node[1].maxConnections, 10)) {
+            this.debugLog("skip node due to full", node);
+
             continue;
           }
 
           if (best === undefined) {
+            this.debugLog("bump node to first as only", node);
             best = node[0];
 
             continue;
           }
 
           if (players < parseInt(nodeData.get(best!)!.currentConnections, 10)) {
+            this.debugLog("bump new node to first as lower player count", node);
             best = node[0];
           }
         }
 
         if (best === undefined) {
+          this.debugLog("drop player due to no servers");
           sender.disconnect(DisconnectReason.custom("There are no servers currently available.\n\nPlease try again later."));
 
           return;
@@ -279,6 +302,7 @@ export class Server {
         const bestData = nodeData.get(best)!;
 
         sender.sendReliable([new RedirectPacket(bestData.host, parseInt(bestData.port, 10))]);
+        this.debugLog("sent player to node bestData", bestData);
         break;
       }
       case RootPacketType.JoinGame: {
@@ -312,8 +336,11 @@ export class Server {
         break;
       }
       case RootPacketType.GetGameList: {
+        this.debugLog("got GetGameList");
+
         if (this.redis.status != "ready") {
           sender.disconnect(DisconnectReason.custom("An error occured while searching for games, and the developers have been notified.\n\nPlease try again."));
+          this.debugLog("drop player due to this.redis.status");
 
           return;
         }
@@ -332,7 +359,9 @@ export class Server {
           listings[i] = this.makeListing(this.reservedCodes.get(gamemode)!, gamemode);
         }
 
-        sender.writeReliable(new GetGameListResponsePacket(listings));
+        this.debugLog("sent listings", listings);
+
+        sender.sendReliable([new GetGameListResponsePacket(listings)]);
         break;
       }
       default: {
@@ -381,9 +410,15 @@ export class Server {
       name.toString(),
       0,
       0,
-      Level.TheSkeld,
+      Level.Polus,
       0,
       0,
     );
+  }
+
+  private debugLog(...args: unknown[]): void {
+    if (this.config.debug) {
+      console.log(...args);
+    }
   }
 }
