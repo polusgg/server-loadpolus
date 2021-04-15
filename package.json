@@ -18,6 +18,8 @@
   "homepage": "https://github.com/polusgg/server-loadpolus",
   "dependencies": {
     "@nodepolus/framework": "latest",
+    "@polusgg/module-polusgg-auth-api": "*",
+    "@polusgg/plugin-polusgg-api": "*",
     "ioredis": "^4.22.0",
     "ts-node": "^9.1.0"
   },

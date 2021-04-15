@@ -2,9 +2,10 @@ import { Level, PacketDestination, RootPacketType } from "@nodepolus/framework/s
 import { ConnectionInfo, DisconnectReason, LobbyListing } from "@nodepolus/framework/src/types";
 import { MessageReader } from "@nodepolus/framework/src/util/hazelMessage";
 import { Connection } from "@nodepolus/framework/src/protocol/connection";
-import { CancelJoinGamePacket } from "./cancelJoinGamePacket";
 import { MaxValue } from "@nodepolus/framework/src/util/constants";
 import { TextComponent } from "@nodepolus/framework/src/api/text";
+import { CancelJoinGamePacket } from "./cancelJoinGamePacket";
+import { AuthHandler } from "./auth";
 import { Config } from "./config";
 import Redis from "ioredis";
 import dgram from "dgram";
@@ -23,6 +24,7 @@ export class Server {
   private readonly redis: Redis.Redis;
   private readonly gamemodes: string[];
   private readonly reservedCodes: Map<string, string> = new Map();
+  private readonly authHandler: AuthHandler = new AuthHandler();
   private readonly codeCallbacks: Map<string, (connection: Connection) => void> = new Map([
     ["!!!!", (connection: Connection): void => {
       connection.sendReliable([new CancelJoinGamePacket("!!!!")]);
@@ -37,7 +39,10 @@ export class Server {
     public readonly config: Config,
   ) {
     this.socket.on("message", (buf, remoteInfo) => {
-      this.getConnection(ConnectionInfo.fromString(`${remoteInfo.address}:${remoteInfo.port}`)).emit("message", new MessageReader(buf));
+      const connection = this.getConnection(ConnectionInfo.fromString(`${remoteInfo.address}:${remoteInfo.port}`));
+      const newMessageReader = this.authHandler.transformInboundPacket(connection, new MessageReader(buf));
+
+      connection.emit("message", newMessageReader);
     });
 
     const redisPort = parseInt(process.env.NP_REDIS_PORT ?? "", 10);
