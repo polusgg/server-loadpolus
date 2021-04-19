@@ -12,10 +12,11 @@ type PolusAuthConfig = {
 */
 
 export class AuthHandler {
-  private readonly requester: Requester = new Requester();
+  private readonly requester: Requester;
 
-  constructor() {
-    this.requester.setAuthenticationToken(process.env.NP_AUTH_TOKEN as string);
+  constructor(authToken: string) {
+    this.requester = new Requester("https://account.polus.gg");
+    this.requester.setAuthenticationToken(authToken);
   }
 
   //#region Packet Authentication
@@ -51,7 +52,7 @@ export class AuthHandler {
     if (connection.getMeta<UserResponseStructure | undefined>("pgg.auth.self") !== undefined) {
       const user = connection.getMeta<UserResponseStructure>("pgg.auth.self");
 
-      const ok = Hmac.verify(remaining.getBuffer().toString(), hmacResult.getBuffer().toString(), user.api_token);
+      const ok = Hmac.verify(remaining.getBuffer(), hmacResult.getBuffer().toString("hex"), user.client_token);
 
       if (!ok) {
         console.warn("Connection %s attempted send an invalid authentication packet. Their HMAC verify failed.", connection);
@@ -67,7 +68,7 @@ export class AuthHandler {
 
     this.fetchAndCacheUser(uuid, connection)
       .then(user => {
-        const ok = Hmac.verify(remaining.getBuffer().toString(), hmacResult.getBuffer().toString(), user.api_token);
+        const ok = Hmac.verify(remaining.getBuffer(), hmacResult.getBuffer().toString("hex"), user.client_token);
 
         if (!ok) {
           console.warn("Connection %s attempted send an invalid authentication packet. Their HMAC verify failed.", connection);

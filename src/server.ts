@@ -24,12 +24,13 @@ export class Server {
   private readonly redis: Redis.Redis;
   private readonly gamemodes: string[];
   private readonly reservedCodes: Map<string, string> = new Map();
-  private readonly authHandler: AuthHandler = new AuthHandler();
   private readonly codeCallbacks: Map<string, (connection: Connection) => void> = new Map([
     ["!!!!", (connection: Connection): void => {
       connection.sendReliable([new CancelJoinGamePacket("!!!!")]);
     }],
   ]);
+
+  private readonly authHandler: AuthHandler;
 
   private connectionIndex = 0;
   private isFetching = false;
@@ -38,13 +39,6 @@ export class Server {
   constructor(
     public readonly config: Config,
   ) {
-    this.socket.on("message", (buf, remoteInfo) => {
-      const connection = this.getConnection(ConnectionInfo.fromString(`${remoteInfo.address}:${remoteInfo.port}`));
-      const newMessageReader = this.authHandler.transformInboundPacket(connection, new MessageReader(buf));
-
-      connection.emit("message", newMessageReader);
-    });
-
     const redisPort = parseInt(process.env.NP_REDIS_PORT ?? "", 10);
     const port = parseInt(process.env.NP_DROPLET_PORT ?? "", 10);
 
@@ -73,7 +67,16 @@ export class Server {
       this.codeCallbacks.set(code, this.createMatchmakingFunction(this.gamemodes[i]));
     }
 
+    this.authHandler = new AuthHandler(process.env.NP_AUTH_TOKEN ?? "");
+
     this.redis.on("connect", () => console.log(`Redis connected to ${config.redis.host}:${config.redis.port}`));
+
+    this.socket.on("message", (buf, remoteInfo) => {
+      const connection = this.getConnection(ConnectionInfo.fromString(`${remoteInfo.address}:${remoteInfo.port}`));
+      const newMessageReader = this.authHandler.transformInboundPacket(connection, MessageReader.fromRawBytes(buf));
+
+      connection.emit("message", newMessageReader);
+    });
 
     setInterval(this.updateGameCache.bind(this), 3000);
   }
