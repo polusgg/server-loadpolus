@@ -19,10 +19,16 @@ export class AuthHandler {
     this.requester.setAuthenticationToken(authToken);
   }
 
-  //#region Packet Authentication
   transformInboundPacket(connection: Connection, packet: MessageReader): MessageReader {
+    const tag = packet.peek(0);
+
+    if (tag == 9) {
+      // ignore disconnect packets, roobscoob sux
+      return packet;
+    }
+
     if (packet.readByte() !== 0x80) {
-      console.warn("Connection %s attempted send an unauthenticated packet", connection);
+      console.warn("Connection %s attempted send an unauthenticated packet", connection.getConnectionInfo().toString());
       connection.disconnect(DisconnectReason.custom("Authentication Error."));
 
       return MessageReader.fromRawBytes([0x00]);
@@ -31,6 +37,7 @@ export class AuthHandler {
     //1 byte for authentication magic (0x80)
     //16 bytes for client UUID
     //20 bytes for SHA1 HMAC
+
     if (packet.getLength() < 1 + 16 + 20) {
       console.warn("Connection %s attempted send an invalid authentication packet. It was too short.", connection);
       connection.disconnect(DisconnectReason.custom("Authentication Error."));
@@ -55,7 +62,7 @@ export class AuthHandler {
       const ok = Hmac.verify(remaining.getBuffer(), hmacResult.getBuffer().toString("hex"), user.client_token);
 
       if (!ok) {
-        console.warn("Connection %s attempted send an invalid authentication packet. Their HMAC verify failed.", connection);
+        console.warn("Connection %s attempted send an invalid authentication packet. Their HMAC verify failed.", connection.getConnectionInfo().toString());
         connection.disconnect(DisconnectReason.custom("Authentication Error."));
 
         return MessageReader.fromRawBytes([0x00]);
@@ -71,7 +78,7 @@ export class AuthHandler {
         const ok = Hmac.verify(remaining.getBuffer(), hmacResult.getBuffer().toString("hex"), user.client_token);
 
         if (!ok) {
-          console.warn("Connection %s attempted send an invalid authentication packet. Their HMAC verify failed.", connection);
+          console.warn("Connection %s attempted send an invalid authentication packet. Their HMAC verify failed.", connection.getConnectionInfo().toString());
           connection.disconnect(DisconnectReason.custom("Authentication Error."));
 
           return;
@@ -80,7 +87,7 @@ export class AuthHandler {
         connection.emit("message", remaining);
       })
       .catch(err => {
-        console.warn("Connection %s attempted send an invalid authentication packet. The API did not return a valid result (%s).", connection, err);
+        console.warn("Connection %s attempted send an invalid authentication packet. The API did not return a valid result (%s).", connection.getConnectionInfo().toString(), err);
         connection.disconnect(DisconnectReason.custom("Authentication Error."));
       });
 
@@ -91,11 +98,9 @@ export class AuthHandler {
     return new Promise((resolve, reject) => {
       this.requester.getUser(uuid).then(user => {
         connection.setMeta("pgg.auth.self", user);
-        console.log(user);
 
         resolve(user);
       }).catch(reject);
     });
   }
-  //#endregion Packet Authentication
 }

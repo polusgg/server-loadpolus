@@ -19,7 +19,7 @@ async function loadConfig(configPath: string = path.join(__dirname, "config.json
     const config = await loadConfig();
     const server = new Server(config);
 
-    server.listen();
+    await server.listen();
   } catch (error) {
     console.error(error);
     process.exit(1);
