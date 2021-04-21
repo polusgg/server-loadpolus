@@ -56,18 +56,20 @@ export class Server {
 
     const enableAuthPackets = process.env.NP_DISABLE_AUTH?.trim() !== "true";
 
-    if (enableAuthPackets) {
-      this.socket.on("message", (buf, remoteInfo) => {
-        const connection = this.getConnection(ConnectionInfo.fromString(`${remoteInfo.address}:${remoteInfo.port}`));
-        const newMessageReader = this.authHandler.transformInboundPacket(connection, MessageReader.fromRawBytes(buf));
+    this.socket.on("message", (buf, remoteInfo) => {
+      const connection = this.getConnection(ConnectionInfo.fromString(`${remoteInfo.address}:${remoteInfo.port}`));
+      let message = MessageReader.fromRawBytes(buf);
 
-        connection.emit("message", newMessageReader);
-      });
-    } else {
-      this.socket.on("message", (buf, remoteInfo) => {
-        this.getConnection(ConnectionInfo.fromString(`${remoteInfo.address}:${remoteInfo.port}`)).emit("message", MessageReader.fromRawBytes(buf));
-      });
-    }
+      if (enableAuthPackets) {
+        message = this.authHandler.transformInboundPacket(connection, message);
+      }
+
+      connection.emit("message", message);
+    });
+
+    this.socket.on("message", (buf, remoteInfo) => {
+      this.getConnection(ConnectionInfo.fromString(`${remoteInfo.address}:${remoteInfo.port}`)).emit("message", MessageReader.fromRawBytes(buf));
+    });
 
     if (config.redis.host?.startsWith("rediss://")) {
       config.redis.host = config.redis.host.substr("rediss://".length);

@@ -4,7 +4,9 @@
   "description": "Load balancer master server",
   "main": "bin/index.ts",
   "scripts": {
-    "start": "ts-node bin/index"
+    "start": "ts-node bin/index",
+    "lint": "eslint . --ext .ts",
+    "lint-and-fix": "eslint . --ext .ts --fix"
   },
   "repository": {
     "type": "git",
