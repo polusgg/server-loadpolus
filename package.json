@@ -22,6 +22,7 @@
     "@nodepolus/framework": "latest",
     "@polusgg/module-polusgg-auth-api": "latest",
     "@polusgg/plugin-polusgg-api": "latest",
+    "got": "^11.8.2",
     "ioredis": "^4.22.0",
     "ts-node": "^9.1.0"
   },
