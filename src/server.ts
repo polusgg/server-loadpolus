@@ -84,6 +84,10 @@ export class Server {
 
     const enableAuthPackets = process.env.NP_DISABLE_AUTH?.trim() !== "true";
 
+    this.socket.on("error", error => {
+      console.error(error);
+    });
+
     this.socket.on("message", (buf, remoteInfo) => {
       const connection = this.getConnection(ConnectionInfo.fromString(`${remoteInfo.address}:${remoteInfo.port}`));
       let message = MessageReader.fromRawBytes(buf);
@@ -93,10 +97,6 @@ export class Server {
       }
 
       connection.emit("message", message);
-    });
-
-    this.socket.on("message", (buf, remoteInfo) => {
-      this.getConnection(ConnectionInfo.fromString(`${remoteInfo.address}:${remoteInfo.port}`)).emit("message", MessageReader.fromRawBytes(buf));
     });
 
     if (config.redis.host?.startsWith("rediss://")) {
@@ -123,13 +123,6 @@ export class Server {
     });
 
     this.authHandler = new AuthHandler(process.env.NP_AUTH_TOKEN ?? "");
-
-    this.socket.on("message", (buf, remoteInfo) => {
-      const connection = this.getConnection(ConnectionInfo.fromString(`${remoteInfo.address}:${remoteInfo.port}`));
-      const newMessageReader = this.authHandler.transformInboundPacket(connection, MessageReader.fromRawBytes(buf));
-
-      connection.emit("message", newMessageReader);
-    });
   }
 
   async listen(): Promise<void> {
