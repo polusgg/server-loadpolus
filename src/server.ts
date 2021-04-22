@@ -136,6 +136,8 @@ export class Server {
     if (isInDocker()) {
       const anchor = await getDropletAddress();
 
+      console.log(`Anchor IP is: "${anchor}"`);
+
       if (anchor !== undefined) {
         this.config.server.host = anchor;
       }
