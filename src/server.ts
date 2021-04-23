@@ -18,34 +18,6 @@ import {
   RedirectPacket,
 } from "@nodepolus/framework/src/protocol/packets/root";
 import { UserResponseStructure } from "@polusgg/module-polusgg-auth-api/src/types/userResponseStructure";
-import { readFileSync } from "fs";
-import got from "got";
-
-const isInDocker = (): boolean => {
-  const platform = os.platform();
-
-  if (platform === "darwin" || platform === "win32") {
-    return false;
-  }
-
-  const file = readFileSync("/proc/self/cgroup", "utf-8");
-
-  return file.indexOf("/docker") !== -1;
-};
-
-const getMeta = async (path: string): Promise<string | undefined> => {
-  path = path.startsWith("/") ? path.substr(1) : path;
-
-  try {
-    const { body } = await got(`http://169.254.169.254/metadata/v1/${path}`);
-
-    return body;
-  } catch (error) {
-    return undefined;
-  }
-};
-
-const getDropletAddress = async (): Promise<string | undefined> => getMeta("interfaces/public/0/anchor_ipv4/address");
 
 export class Server {
   private readonly socket = dgram.createSocket("udp4");
@@ -125,15 +97,7 @@ export class Server {
     this.authHandler = new AuthHandler(process.env.NP_AUTH_TOKEN ?? "");
   }
 
-  async listen(): Promise<void> {
-    if (isInDocker()) {
-      const anchor = await getDropletAddress();
-
-      if (anchor !== undefined) {
-        this.config.server.host = anchor;
-      }
-    }
-
+  listen(): void {
     this.socket.bind(this.config.server.port, this.config.server.host, () => {
       console.log(`Server running on ${this.config.server.host}:${this.config.server.port}`);
     });
