@@ -29,7 +29,7 @@ export class AuthHandler {
 
     if (packet.readByte() !== 0x80) {
       console.warn("Connection %s attempted send an unauthenticated packet", connection.getConnectionInfo().toString());
-      connection.disconnect(DisconnectReason.custom("Authentication Error."));
+      connection.disconnect(DisconnectReason.custom("Authentication Error - Unauthenticated packet."));
 
       return MessageReader.fromRawBytes([0x00]);
     }
@@ -40,14 +40,14 @@ export class AuthHandler {
 
     if (packet.getLength() < 1 + 16 + 20) {
       console.warn("Connection %s attempted send an invalid authentication packet. It was too short.", connection);
-      connection.disconnect(DisconnectReason.custom("Authentication Error."));
+      connection.disconnect(DisconnectReason.custom("Authentication Error - Packet too short."));
 
       return MessageReader.fromRawBytes([0x00]);
     }
 
     if (packet.getLength() <= 1 + 16 + 20) {
       console.warn("Connection %s attempted send an invalid authentication packet. It was empty.", connection);
-      connection.disconnect(DisconnectReason.custom("Authentication Error."));
+      connection.disconnect(DisconnectReason.custom("Authentication Error - Empty packet."));
 
       return MessageReader.fromRawBytes([0x00]);
     }
@@ -63,7 +63,7 @@ export class AuthHandler {
 
       if (!ok) {
         console.warn("Connection %s attempted send an invalid authentication packet. Their HMAC verify failed.", connection.getConnectionInfo().toString());
-        connection.disconnect(DisconnectReason.custom("Authentication Error."));
+        connection.disconnect(DisconnectReason.custom("Authentication Error - Invalid HMAC."));
 
         return MessageReader.fromRawBytes([0x00]);
       }
@@ -79,7 +79,7 @@ export class AuthHandler {
 
         if (!ok) {
           console.warn("Connection %s attempted send an invalid authentication packet. Their HMAC verify failed.", connection.getConnectionInfo().toString());
-          connection.disconnect(DisconnectReason.custom("Authentication Error."));
+          connection.disconnect(DisconnectReason.custom("Authentication Error - Invalid HMAC (from fetchAndCacheUser)."));
 
           return;
         }
@@ -88,7 +88,7 @@ export class AuthHandler {
       })
       .catch(err => {
         console.warn("Connection %s attempted send an invalid authentication packet. The API did not return a valid result (%s).", connection.getConnectionInfo().toString(), err);
-        connection.disconnect(DisconnectReason.custom("Authentication Error."));
+        connection.disconnect(DisconnectReason.custom("Authentication Error - Invalid API response."));
       });
 
     return MessageReader.fromRawBytes([0x00]);
