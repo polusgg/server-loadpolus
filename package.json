@@ -5,6 +5,7 @@
   "main": "bin/index.ts",
   "scripts": {
     "start": "ts-node bin/index",
+    "uuid": "ts-node src/test",
     "lint": "eslint . --ext .ts",
     "lint-and-fix": "eslint . --ext .ts --fix"
   },

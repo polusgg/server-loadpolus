@@ -5,93 +5,82 @@ import { Connection } from "@nodepolus/framework/src/protocol/connection";
 import { DisconnectReason } from "@nodepolus/framework/src/types";
 import { Hmac } from "@nodepolus/framework/src/util/hmac";
 
-/*
-type PolusAuthConfig = {
-  token: string;
-};
-*/
+const TAG_AUTH = 0x80 as const;
+const LENGTH_UUID = 16 as const;
+const LENGTH_HASH = 20 as const;
+const LENGTH_AUTH_HEADER = 1 + LENGTH_UUID + LENGTH_HASH;
 
 export class AuthHandler {
   private readonly requester: Requester;
 
   constructor(authToken: string) {
     this.requester = new Requester("https://account.polus.gg");
+
     this.requester.setAuthenticationToken(authToken);
   }
 
   transformInboundPacket(connection: Connection, packet: MessageReader): MessageReader {
-    const tag = packet.peek(0);
-
-    if (tag == 9) {
-      // ignore disconnect packets, roobscoob sux
+    // Ignore disconnect packets
+    if (packet.peek(0) == 9) {
       return packet;
     }
 
-    if (packet.readByte() !== 0x80) {
-      console.warn("Connection %s sent an unauthenticated packet", connection.getConnectionInfo().toString());
+    if (packet.readByte() !== TAG_AUTH) {
+      console.warn(`Connection ${connection.getConnectionInfo().toString()} sent an unauthenticated packet`);
       connection.disconnect(DisconnectReason.custom("Authentication error: unauthenticated packet"));
 
-      return MessageReader.fromRawBytes([0x00]);
+      return new MessageReader();
     }
 
-    //1 byte for authentication magic (0x80)
-    //16 bytes for client UUID
-    //20 bytes for SHA1 HMAC
-
-    if (packet.getLength() < 1 + 16 + 20) {
-      console.warn("Connection %s sent an authenticated packet that was too short", connection.getConnectionInfo().toString());
+    if (packet.getLength() < LENGTH_AUTH_HEADER) {
+      console.warn(`Connection ${connection.getConnectionInfo().toString()} sent an authenticated packet that was too short`);
       connection.disconnect(DisconnectReason.custom("Authentication error: packet too short"));
 
-      return MessageReader.fromRawBytes([0x00]);
+      return new MessageReader();
     }
 
-    if (packet.getLength() <= 1 + 16 + 20) {
-      console.warn("Connection %s sent an authenticated packet that was empty", connection.getConnectionInfo().toString());
+    if (packet.getLength() === LENGTH_AUTH_HEADER) {
+      console.warn(`Connection ${connection.getConnectionInfo().toString()} sent an authenticated packet that was empty`);
       connection.disconnect(DisconnectReason.custom("Authentication error: empty packet"));
 
-      return MessageReader.fromRawBytes([0x00]);
+      return new MessageReader();
     }
 
-    const uuid = `${packet.readBytes(4).getBuffer().toString("hex")}-${packet.readBytes(2).getBuffer().toString("hex")}-${packet.readBytes(2).getBuffer().toString("hex")}-${packet.readBytes(2).getBuffer().toString("hex")}-${packet.readBytes(6).getBuffer().toString("hex")}`;
-    const hmacResult = packet.readBytes(20);
-    const remaining = packet.readRemainingBytes();
+    const uuid = `${packet.readBytesAsString(4, "hex")}-${packet.readBytesAsString(2, "hex")}-${packet.readBytesAsString(2, "hex")}-${packet.readBytesAsString(2, "hex")}-${packet.readBytesAsString(6, "hex")}`;
+    const signature = packet.readBytes(20);
+    const message = packet.readRemainingBytes();
 
     if (connection.getMeta<UserResponseStructure | undefined>("pgg.auth.self") !== undefined) {
       const user = connection.getMeta<UserResponseStructure>("pgg.auth.self");
 
-      const ok = Hmac.verify(remaining.getBuffer(), hmacResult.getBuffer().toString("hex"), user.client_token);
-
-      if (!ok) {
-        console.warn("Connection %s sent an authenticated packet with a mismatching signature (cached)", connection.getConnectionInfo().toString());
+      if (!Hmac.verify(message.getBuffer(), signature.getBuffer().toString("hex"), user.client_token)) {
+        console.warn(`Connection ${connection.getConnectionInfo().toString()} sent an authenticated packet with a mismatching signature (cached)`);
         connection.disconnect(DisconnectReason.custom("Authentication error: signature mismatch (cached)"));
 
-        return MessageReader.fromRawBytes([0x00]);
+        return new MessageReader();
       }
 
-      return remaining;
+      return message;
     }
 
-    // cache miss
-
+    // Cache miss
     this.fetchAndCacheUser(uuid, connection)
       .then(user => {
-        const ok = Hmac.verify(remaining.getBuffer(), hmacResult.getBuffer().toString("hex"), user.client_token);
-
-        if (!ok) {
-          console.warn("Connection %s sent an authenticated packet with a mismatching signature", connection.getConnectionInfo().toString());
+        if (!Hmac.verify(message.getBuffer(), signature.getBuffer().toString("hex"), user.client_token)) {
+          console.warn(`Connection ${connection.getConnectionInfo().toString()} sent an authenticated packet with a mismatching signature`);
           connection.disconnect(DisconnectReason.custom("Authentication error: signature mismatch"));
 
           return;
         }
 
-        connection.emit("message", remaining);
+        connection.emit("message", message);
       })
       .catch(err => {
-        console.warn("Connection %s sent an authenticated packet which received an invalid API response: %s", connection.getConnectionInfo().toString(), err);
+        console.warn(`Connection ${connection.getConnectionInfo().toString()} sent an authenticated packet which received an invalid API response:`, err);
         connection.disconnect(DisconnectReason.custom("Authentication error: invalid auth server response"));
       });
 
-    return MessageReader.fromRawBytes([0x00]);
+    return new MessageReader();
   }
 
   private async fetchAndCacheUser(uuid: string, connection: Connection): Promise<UserResponseStructure> {

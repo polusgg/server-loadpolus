@@ -1,8 +1,9 @@
-import { Level, PacketDestination, RootPacketType } from "@nodepolus/framework/src/types/enums";
 import { ClientVersion, ConnectionInfo, DisconnectReason, LobbyListing, Mutable } from "@nodepolus/framework/src/types";
+import { UserResponseStructure } from "@polusgg/module-polusgg-auth-api/src/types/userResponseStructure";
+import { Level, PacketDestination, RootPacketType } from "@nodepolus/framework/src/types/enums";
+import { MaxValue, SUPPORTED_VERSIONS } from "@nodepolus/framework/src/util/constants";
 import { MessageReader } from "@nodepolus/framework/src/util/hazelMessage";
 import { Connection } from "@nodepolus/framework/src/protocol/connection";
-import { MaxValue, SUPPORTED_VERSIONS } from "@nodepolus/framework/src/util/constants";
 import { TextComponent } from "@nodepolus/framework/src/api/text";
 import { CancelJoinGamePacket } from "./cancelJoinGamePacket";
 import { AuthHandler } from "./auth";
@@ -17,20 +18,18 @@ import {
   JoinedGamePacket,
   RedirectPacket,
 } from "@nodepolus/framework/src/protocol/packets/root";
-import { UserResponseStructure } from "@polusgg/module-polusgg-auth-api/src/types/userResponseStructure";
 
 export class Server {
   private readonly socket = dgram.createSocket("udp4");
   private readonly connections: Map<string, Connection> = new Map();
   private readonly redis: Redis.Redis;
   private readonly reservedCodes: Map<string, string> = new Map();
+  private readonly authHandler: AuthHandler;
   private readonly codeCallbacks: Map<string, (connection: Connection) => void> = new Map([
     ["!!!!", (connection: Connection): void => {
       connection.sendReliable([new CancelJoinGamePacket("!!!!")]);
     }],
   ]);
-
-  private readonly authHandler: AuthHandler;
 
   private connectionIndex = 0;
   private isFetching = false;
