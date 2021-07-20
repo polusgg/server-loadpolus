@@ -2,7 +2,7 @@
   "server": {
     "host": "0.0.0.0",
     "port": 22023,
-    "publicIp": "127.0.0.1",
+    "publicIp": "192.168.86.43",
     "name": "master-1"
   },
   "redis": {

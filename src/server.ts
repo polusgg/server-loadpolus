@@ -32,9 +32,10 @@ export class Server {
   ]);
 
   private connectionIndex = 0;
-  private isFetching = false;
+  private isRefreshing = false;
   private lobbyCache: Record<string, string>[] = [];
   private gamemodes: string[] = [];
+  private dynamicConfig: Record<string, string> = {};
 
   constructor(
     public readonly config: Config,
@@ -90,7 +91,7 @@ export class Server {
         this.codeCallbacks.set(code, this.createMatchmakingFunction(this.gamemodes[i]));
       }
 
-      setInterval(this.updateGameCache.bind(this), 3000);
+      setInterval(this.refreshRedisData.bind(this), 3000);
     });
 
     this.authHandler = new AuthHandler(process.env.NP_AUTH_TOKEN ?? "");
@@ -121,20 +122,31 @@ export class Server {
   private handleMatchmaking(gamemode: string, connection: Connection): void {
     this.debugLog("handleMatchmaking() invoked", gamemode, connection);
 
+    const targetVersion = this.getTargetVersion();
+
     const results = this.lobbyCache.filter(game => {
       if (game.public !== "true") {
+        this.debugLog("sort filtered out", game, "due to not being public");
         return false;
       }
 
+      if (game.serverVersion != targetVersion) {
+        this.debugLog("sort filtered out", game, "due to wrong version");
+        return false
+      }
+
       if (game.gamemode !== gamemode) {
+        this.debugLog("sort filtered out", game, "due to wrong gamemode");
         return false;
       }
 
       if (parseInt(game.currentPlayers, 10) >= parseInt(game.maxPlayers, 10)) {
+        this.debugLog("sort filtered out", game, "due to being full");
         return false;
       }
 
       if (game.gameState !== "NotStarted") {
+        this.debugLog("sort filtered out", game, "due to not being in lobby");
         return false;
       }
 
@@ -161,16 +173,16 @@ export class Server {
     }).bind(this);
   }
 
-  private async updateGameCache(): Promise<void> {
+  private async refreshRedisData(): Promise<void> {
     //this.debugLog("updateGameCache() invoked");
 
-    if (this.isFetching) {
-      this.debugLog("updateGameCache() cancelled due to this.isFetching");
+    if (this.isRefreshing) {
+      this.debugLog("refreshRedisData() cancelled due to this.isRefreshing");
 
       return;
     }
 
-    this.isFetching = true;
+    this.isRefreshing = true;
 
     try {
       // Get all nodes
@@ -220,8 +232,21 @@ export class Server {
       }
 
       this.lobbyCache = tempCache;
+
+      // update dynamicConfig
+      const dynamicConfigCache = await this.redis.hgetall("loadpolus.config");
+
+      if (Object.keys(dynamicConfigCache).length == 0) {
+        throw Error("loadpolus.config is not present in Redis");
+      }
+
+      if (dynamicConfigCache.targetVersion === undefined) {
+        throw Error("key targetVersion in loadpolus.config is not present in Redis");
+      }
+      
+      this.dynamicConfig = dynamicConfigCache;
     } finally {
-      this.isFetching = false;
+      this.isRefreshing = false;
     }
 
     //this.debugLog("updateGameCache() results", this.lobbyCache);
@@ -286,10 +311,12 @@ export class Server {
 
         // TODO: allow option to toggle which server you get sent to
 
+        const targetVersion = this.getTargetVersion();
+
         if (userData.perks.includes("server.access.creator")) {
-          nodeData = await this.fetchNodes("loadpolus.nodes.creator");
+          nodeData = await this.fetchNodes(`loadpolus.nodes.${targetVersion}.creator`);
         } else {
-          nodeData = await this.fetchNodes();
+          nodeData = await this.fetchNodes(`loadpolus.nodes.${targetVersion}`);
         }
 
         this.debugLog("available nodes:", nodeData);
@@ -466,8 +493,12 @@ export class Server {
     );
   }
 
+  private getTargetVersion() {
+    return this.dynamicConfig.targetVersion;
+  }
+
   private debugLog(...args: unknown[]): void {
-    if (this.config.debug) {
+    if (true) {
       console.log(...args);
     }
   }
