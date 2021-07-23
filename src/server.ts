@@ -23,6 +23,7 @@ export class Server {
   private readonly socket = dgram.createSocket("udp4");
   private readonly connections: Map<string, Connection> = new Map();
   private readonly redis: Redis.Redis;
+  private readonly subscriberRedis: Redis.Redis;
   private readonly reservedCodes: Map<string, string> = new Map();
   private readonly authHandler: AuthHandler;
   private readonly transitioningConnections: Map<string, Connection[]> = new Map();
@@ -79,6 +80,7 @@ export class Server {
     }
 
     this.redis = new Redis(config.redis);
+    this.subscriberRedis = new Redis(config.redis);
 
     this.redis.once("connect", async () => {
       console.log(`Redis connected to ${config.redis.host}:${config.redis.port}`);
@@ -98,6 +100,20 @@ export class Server {
         host: config.server.publicIp,
         port: config.server.port,
       });
+    });
+
+    this.subscriberRedis.on("message", async (channel: string, message: string) => {
+      if (channel !== "loadpolus.lobby.create") {
+        return;
+      }
+
+      const lobbyInfo = JSON.parse(message) as { type: 1; code: string; hostsJson: string } | { type: 2; code: string };
+
+      if (lobbyInfo.type !== 2) {
+        return;
+      }
+
+      // NOTE: continue here 
     });
 
     this.authHandler = new AuthHandler(process.env.NP_AUTH_TOKEN ?? "");
@@ -357,6 +373,7 @@ export class Server {
 
         const lobbyData = await this.redis.hgetall(`loadpolus.lobby.${joinedGamePacket.lobbyCode}`);
 
+
         if (Object.keys(lobbyData).length < 1) {
           console.log("Kicked", sender.getConnectionInfo().toString(), "trying to join non-existent lobby", joinedGamePacket.lobbyCode);
           sender.disconnect(DisconnectReason.gameNotFound());
@@ -373,14 +390,23 @@ export class Server {
           }
         }
 
-        if (lobbyData.gameState !== "Transitioning") {
-          sender.sendReliable([new RedirectPacket(
-            lobbyData.host,
-            parseInt(lobbyData.port, 10),
-          )]);
+        if (lobbyData.gameState == "Started") {
+          console.log("Kicked", sender.getConnectionInfo().toString(), "trying to join in-progress game", joinedGamePacket.lobbyCode);
+          sender.disconnect(DisconnectReason.gameStarted());
+
+          return;
         }
 
-        this.transitionLobby(sender, joinedGamePacket);
+        if (lobbyData.transitioning === "true") {
+          this.transitionLobby(sender, joinedGamePacket);
+
+          return;
+        }
+
+        sender.sendReliable([new RedirectPacket(
+          lobbyData.host,
+          parseInt(lobbyData.port, 10),
+        )]);
 
         break;
       }
@@ -535,8 +561,23 @@ export class Server {
 
     if (best === undefined) {
       sender.disconnect(DisconnectReason.custom("Your server has closed, and no other servers were found to move you to."));
+
+      return;
     }
 
-    
+    const lobbyInfo = await this.redis.hgetall(`loadpolus.lobbies.${joinedGamePacket.lobbyCode}`);
+
+    await this.redis.publish("loadpolus.lobby.create", JSON.stringify({
+      type: 1,
+      code: joinedGamePacket.lobbyCode,
+      hostsJson: lobbyInfo.hostsJson
+    }));
+
+    this.redis.hmset(`loadpolus.lobbies.${joinedGamePacket.lobbyCode}`, {
+      host: best.host,
+      port: best.port,
+    });
+
+    this.transitioningConnections.set(joinedGamePacket.lobbyCode, [sender]);
   }
 }
