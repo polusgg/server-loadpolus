@@ -92,6 +92,11 @@ export class Server {
       }
 
       setInterval(this.refreshRedisData.bind(this), 3000);
+
+      this.redis.hmset("loadpolus.master.info", {
+        "host": config.server.publicIp,
+        "port": config.server.port
+      });
     });
 
     this.authHandler = new AuthHandler(process.env.NP_AUTH_TOKEN ?? "");
