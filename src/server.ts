@@ -25,6 +25,7 @@ export class Server {
   private readonly redis: Redis.Redis;
   private readonly reservedCodes: Map<string, string> = new Map();
   private readonly authHandler: AuthHandler;
+  private readonly transitioningConnections: Map<string, Connection[]> = new Map();
   private readonly codeCallbacks: Map<string, (connection: Connection) => void> = new Map([
     ["!!!!", (connection: Connection): void => {
       connection.sendReliable([new CancelJoinGamePacket("!!!!")]);
@@ -94,8 +95,8 @@ export class Server {
       setInterval(this.refreshRedisData.bind(this), 3000);
 
       this.redis.hmset("loadpolus.master.info", {
-        "host": config.server.publicIp,
-        "port": config.server.port
+        host: config.server.publicIp,
+        port: config.server.port,
       });
     });
 
@@ -132,26 +133,31 @@ export class Server {
     const results = this.lobbyCache.filter(game => {
       if (game.public !== "true") {
         this.debugLog("sort filtered out", game, "due to not being public");
+
         return false;
       }
 
       if (game.serverVersion != targetVersion) {
         this.debugLog("sort filtered out", game, "due to wrong version");
-        return false
+
+        return false;
       }
 
       if (game.gamemode !== gamemode) {
         this.debugLog("sort filtered out", game, "due to wrong gamemode");
+
         return false;
       }
 
       if (parseInt(game.currentPlayers, 10) >= parseInt(game.maxPlayers, 10)) {
         this.debugLog("sort filtered out", game, "due to being full");
+
         return false;
       }
 
       if (game.gameState !== "NotStarted") {
         this.debugLog("sort filtered out", game, "due to not being in lobby");
+
         return false;
       }
 
@@ -245,10 +251,10 @@ export class Server {
         throw Error("loadpolus.config is not present in Redis");
       }
 
-      if (dynamicConfigCache.targetVersion === undefined) {
+      if (!("targetVersion" in dynamicConfigCache)) {
         throw Error("key targetVersion in loadpolus.config is not present in Redis");
       }
-      
+
       this.dynamicConfig = dynamicConfigCache;
     } finally {
       this.isRefreshing = false;
@@ -312,49 +318,12 @@ export class Server {
         this.debugLog("got to HostGame");
 
         const userData = sender.getMeta<UserResponseStructure>("pgg.auth.self");
-        let nodeData: Map<string, Record<string, string>>;
 
         // TODO: allow option to toggle which server you get sent to
 
         const targetVersion = this.getTargetVersion();
-
-        if (userData.perks.includes("server.access.creator")) {
-          nodeData = await this.fetchNodes(`loadpolus.nodes.${targetVersion}.creator`);
-        } else {
-          nodeData = await this.fetchNodes(`loadpolus.nodes.${targetVersion}`);
-        }
-
-        this.debugLog("available nodes:", nodeData);
-
-        let best: string | undefined;
-
-        for (const node of nodeData) {
-          if (node[1].maintenance === "true") {
-            this.debugLog("skip node due to maintenance", node);
-
-            continue;
-          }
-
-          const players = parseInt(node[1].currentConnections, 10);
-
-          if (players >= parseInt(node[1].maxConnections, 10)) {
-            this.debugLog("skip node due to full", node);
-
-            continue;
-          }
-
-          if (best === undefined) {
-            this.debugLog("bump node to first as only", node);
-            best = node[0];
-
-            continue;
-          }
-
-          if (players < parseInt(nodeData.get(best!)!.currentConnections, 10)) {
-            this.debugLog("bump new node to first as lower player count", node);
-            best = node[0];
-          }
-        }
+        const server = `loadpolus.nodes.${targetVersion}${userData.perks.includes("server.access.creator") ? ".creator" : ""}`;
+        const best = await this.selectServer(server);
 
         if (best === undefined) {
           console.error("Kicked", sender.getConnectionInfo().toString(), "because no servers are available!");
@@ -363,10 +332,8 @@ export class Server {
           return;
         }
 
-        const bestData = nodeData.get(best)!;
-
-        sender.sendReliable([new RedirectPacket(bestData.host, parseInt(bestData.port, 10))]);
-        console.log("Redirected", sender.getConnectionInfo().toString(), "to node", bestData.host, "to host game");
+        sender.sendReliable([new RedirectPacket(best.host, parseInt(best.port, 10))]);
+        console.log("Redirected", sender.getConnectionInfo().toString(), "to node", best.host, "to host game");
 
         //this.debugLog("sent player to node bestData", bestData);
         break;
@@ -406,11 +373,15 @@ export class Server {
           }
         }
 
-        sender.sendReliable([new RedirectPacket(
-          lobbyData.host,
-          parseInt(lobbyData.port, 10),
-        )]);
-        console.log("Redirected", sender.getConnectionInfo().toString(), "to", lobbyData.host, "to join game", joinedGamePacket.lobbyCode);
+        if (lobbyData.gameState !== "Transitioning") {
+          sender.sendReliable([new RedirectPacket(
+            lobbyData.host,
+            parseInt(lobbyData.port, 10),
+          )]);
+        }
+
+        this.transitionLobby(sender, joinedGamePacket);
+
         break;
       }
       case RootPacketType.GetGameList: {
@@ -498,13 +469,74 @@ export class Server {
     );
   }
 
-  private getTargetVersion() {
+  private getTargetVersion(): string {
     return this.dynamicConfig.targetVersion;
   }
 
-  private debugLog(...args: unknown[]): void {
-    if (true) {
-      console.log(...args);
+  private debugLog(..._args: unknown[]): void {
+    console.log(..._args);
+  }
+
+  private async selectServer(nodes: string): Promise<Record<string, string> | undefined> {
+    const nodeData: Map<string, Record<string, string>> = await this.fetchNodes(nodes);
+
+    this.debugLog("available nodes:", nodeData);
+
+    let best: string | undefined;
+
+    for (const node of nodeData) {
+      if (node[1].maintenance === "true") {
+        this.debugLog("skip node due to maintenance", node);
+
+        continue;
+      }
+
+      const players = parseInt(node[1].currentConnections, 10);
+
+      if (players >= parseInt(node[1].maxConnections, 10)) {
+        this.debugLog("skip node due to full", node);
+
+        continue;
+      }
+
+      if (best === undefined) {
+        this.debugLog("bump node to first as only", node);
+        best = node[0];
+
+        continue;
+      }
+
+      if (players < parseInt(nodeData.get(best!)!.currentConnections, 10)) {
+        this.debugLog("bump new node to first as lower player count", node);
+        best = node[0];
+      }
     }
+
+    return best ? nodeData.get(best) : undefined;
+  }
+
+  private async transitionLobby(sender: Connection, joinedGamePacket: JoinedGamePacket): Promise<void> {
+    // lobby is moving servers
+    // find an appropriate version to host the lobby on
+
+    if (this.transitioningConnections.has(joinedGamePacket.lobbyCode)) {
+      this.transitioningConnections.get(joinedGamePacket.lobbyCode)!.push(sender);
+
+      return;
+    }
+
+    const userData = sender.getMeta<UserResponseStructure>("pgg.auth.self");
+
+    // TODO: allow option to toggle which server you get sent to
+
+    const targetVersion = this.getTargetVersion();
+    const server = `loadpolus.nodes.${targetVersion}${userData.perks.includes("server.access.creator") ? ".creator" : ""}`;
+    const best = await this.selectServer(server);
+
+    if (best === undefined) {
+      sender.disconnect(DisconnectReason.custom("Your server has closed, and no other servers were found to move you to."));
+    }
+
+    
   }
 }
