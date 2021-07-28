@@ -103,18 +103,50 @@ export class Server {
     });
 
     this.subscriberRedis.on("message", async (channel: string, message: string) => {
+      console.log("got the funny message");
       if (channel !== "loadpolus.lobby.create") {
         return;
       }
 
-      const lobbyInfo = JSON.parse(message) as { type: 1; code: string; hostsJson: string } | { type: 2; code: string };
-
+      const lobbyInfo = JSON.parse(message) as { type: 1; code: string; hostsJson: string; targetNode: string } | { type: 2; code: string; targetNode: string };
+      
       if (lobbyInfo.type !== 2) {
         return;
       }
 
-      // NOTE: continue here 
+      console.log(lobbyInfo);
+      
+      if (!this.transitioningConnections.has(lobbyInfo.code)) {
+        console.log(lobbyInfo.code, "is not in transitioningConnections?!");
+        
+        return;
+      }
+
+      const connectionsThatINeedToWorryAbout = this.transitioningConnections.get(lobbyInfo.code)!;
+
+      console.log("targetNode is", lobbyInfo.targetNode)
+      const serverInfo = await this.redis.hgetall(`loadpolus.node.${lobbyInfo.targetNode}`);
+
+      console.log("woo we got past all the bullshit");
+      console.log(serverInfo);
+
+      await this.redis.hmset(`loadpolus.lobby.${lobbyInfo.code}`, {
+        transitioning: "false",
+      });
+
+      for (let i = 0; i < connectionsThatINeedToWorryAbout.length; i++) {
+        const aConnectionThatINeedToWorryAbout = connectionsThatINeedToWorryAbout[i];
+
+        aConnectionThatINeedToWorryAbout.sendReliable([new RedirectPacket(serverInfo.host, parseInt(serverInfo.port))]);
+
+        console.log("redirected", aConnectionThatINeedToWorryAbout);
+      }
+      
+      console.log("all done (swagging)");
+      this.transitioningConnections.delete(lobbyInfo.code);
     });
+
+    this.subscriberRedis.subscribe("loadpolus.lobby.create");
 
     this.authHandler = new AuthHandler(process.env.NP_AUTH_TOKEN ?? "");
   }
@@ -312,6 +344,8 @@ export class Server {
       if (result[0] !== null) {
         continue;
       }
+
+      result[1].nodeName = availableNodes[i];
 
       nodeData.set(availableNodes[i], result[1]);
     }
@@ -542,10 +576,14 @@ export class Server {
   }
 
   private async transitionLobby(sender: Connection, joinedGamePacket: JoinedGamePacket): Promise<void> {
+    console.log("we're transitioning lobbies now");
+
     // lobby is moving servers
     // find an appropriate version to host the lobby on
 
     if (this.transitioningConnections.has(joinedGamePacket.lobbyCode)) {
+      console.log("we already have a transitioningconnections list so we're going to add this conn to it");
+
       this.transitioningConnections.get(joinedGamePacket.lobbyCode)!.push(sender);
 
       return;
@@ -560,23 +598,31 @@ export class Server {
     const best = await this.selectServer(server);
 
     if (best === undefined) {
-      sender.disconnect(DisconnectReason.custom("Your server has closed, and no other servers were found to move you to."));
+      console.log("epic fail");
+      sender.disconnect(DisconnectReason.custom("The server you were previously on closed, and no other servers are available. Please try again later."));
 
       return;
     }
 
-    const lobbyInfo = await this.redis.hgetall(`loadpolus.lobbies.${joinedGamePacket.lobbyCode}`);
+    console.log("epic win (we found a server)", best);
+
+    const lobbyInfo = await this.redis.hgetall(`loadpolus.lobby.${joinedGamePacket.lobbyCode}`);
+    console.log("lobbyinfo", lobbyInfo);
 
     await this.redis.publish("loadpolus.lobby.create", JSON.stringify({
       type: 1,
       code: joinedGamePacket.lobbyCode,
-      hostsJson: lobbyInfo.hostsJson
+      hostsJson: lobbyInfo.hostsJson,
+      targetNode: best.nodeName
     }));
+    console.log("published the funny request");
 
-    this.redis.hmset(`loadpolus.lobbies.${joinedGamePacket.lobbyCode}`, {
+    await this.redis.hmset(`loadpolus.lobby.${joinedGamePacket.lobbyCode}`, {
       host: best.host,
       port: best.port,
     });
+
+    console.log("updated the info");
 
     this.transitioningConnections.set(joinedGamePacket.lobbyCode, [sender]);
   }
