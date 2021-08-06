@@ -169,7 +169,7 @@ export class Server {
       return;
     }
 
-    const lobby = results.sort((a, b) => parseInt(a.currentPlayers, 10) - parseInt(b.currentPlayers, 10))[results.length - 1];
+    const lobby = results[Math.floor(Math.random() * results.length)];
 
     connection.sendReliable([
       new HostGameResponsePacket(lobby.code),
