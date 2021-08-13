@@ -21,7 +21,7 @@ export class AuthHandler {
 
   transformInboundPacket(connection: Connection, packet: MessageReader): MessageReader {
     // Ignore disconnect packets
-    if (packet.peek(0) == 9) {
+    if (packet.peek(0) == 9 || packet.peek(0) == 10) {
       return packet;
     }
 
