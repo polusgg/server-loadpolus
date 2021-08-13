@@ -23,10 +23,8 @@ export class Server {
   private readonly socket = dgram.createSocket("udp4");
   private readonly connections: Map<string, Connection> = new Map();
   private readonly redis: Redis.Redis;
-  private readonly subscriberRedis: Redis.Redis;
   private readonly reservedCodes: Map<string, string> = new Map();
   private readonly authHandler: AuthHandler;
-  private readonly transitioningConnections: Map<string, Connection[]> = new Map();
   private readonly codeCallbacks: Map<string, (connection: Connection) => void> = new Map([
     ["!!!!", (connection: Connection): void => {
       connection.sendReliable([new CancelJoinGamePacket("!!!!")]);
@@ -80,7 +78,6 @@ export class Server {
     }
 
     this.redis = new Redis(config.redis);
-    this.subscriberRedis = new Redis(config.redis);
 
     this.redis.once("connect", async () => {
       console.log(`Redis connected to ${config.redis.host}:${config.redis.port}`);
@@ -101,52 +98,6 @@ export class Server {
         port: config.server.port,
       });
     });
-
-    this.subscriberRedis.on("message", async (channel: string, message: string) => {
-      console.log("got the funny message");
-      if (channel !== "loadpolus.lobby.create") {
-        return;
-      }
-
-      const lobbyInfo = JSON.parse(message) as { type: 1; code: string; hostsJson: string; targetNode: string } | { type: 2; code: string; targetNode: string };
-      
-      if (lobbyInfo.type !== 2) {
-        return;
-      }
-
-      console.log(lobbyInfo);
-      
-      if (!this.transitioningConnections.has(lobbyInfo.code)) {
-        console.log(lobbyInfo.code, "is not in transitioningConnections?!");
-        
-        return;
-      }
-
-      const connectionsThatINeedToWorryAbout = this.transitioningConnections.get(lobbyInfo.code)!;
-
-      console.log("targetNode is", lobbyInfo.targetNode)
-      const serverInfo = await this.redis.hgetall(`loadpolus.node.${lobbyInfo.targetNode}`);
-
-      console.log("woo we got past all the bullshit");
-      console.log(serverInfo);
-
-      await this.redis.hmset(`loadpolus.lobby.${lobbyInfo.code}`, {
-        transitioning: "false",
-      });
-
-      for (let i = 0; i < connectionsThatINeedToWorryAbout.length; i++) {
-        const aConnectionThatINeedToWorryAbout = connectionsThatINeedToWorryAbout[i];
-
-        aConnectionThatINeedToWorryAbout.sendReliable([new RedirectPacket(serverInfo.host, parseInt(serverInfo.port))]);
-
-        console.log("redirected", aConnectionThatINeedToWorryAbout);
-      }
-      
-      console.log("all done (swagging)");
-      this.transitioningConnections.delete(lobbyInfo.code);
-    });
-
-    this.subscriberRedis.subscribe("loadpolus.lobby.create");
 
     this.authHandler = new AuthHandler(process.env.NP_AUTH_TOKEN ?? "");
   }
@@ -431,12 +382,6 @@ export class Server {
           return;
         }
 
-        if (lobbyData.transitioning === "true") {
-          this.transitionLobby(sender, joinedGamePacket);
-
-          return;
-        }
-
         sender.sendReliable([new RedirectPacket(
           lobbyData.host,
           parseInt(lobbyData.port, 10),
@@ -573,57 +518,5 @@ export class Server {
     }
 
     return best ? nodeData.get(best) : undefined;
-  }
-
-  private async transitionLobby(sender: Connection, joinedGamePacket: JoinedGamePacket): Promise<void> {
-    console.log("we're transitioning lobbies now");
-
-    // lobby is moving servers
-    // find an appropriate version to host the lobby on
-
-    if (this.transitioningConnections.has(joinedGamePacket.lobbyCode)) {
-      console.log("we already have a transitioningconnections list so we're going to add this conn to it");
-
-      this.transitioningConnections.get(joinedGamePacket.lobbyCode)!.push(sender);
-
-      return;
-    }
-
-    const userData = sender.getMeta<UserResponseStructure>("pgg.auth.self");
-
-    // TODO: allow option to toggle which server you get sent to
-
-    const targetVersion = this.getTargetVersion();
-    const server = `loadpolus.nodes.${targetVersion}${userData.perks.includes("server.access.creator") ? ".creator" : ""}`;
-    const best = await this.selectServer(server);
-
-    if (best === undefined) {
-      console.log("epic fail");
-      sender.disconnect(DisconnectReason.custom("The server you were previously on closed, and no other servers are available. Please try again later."));
-
-      return;
-    }
-
-    console.log("epic win (we found a server)", best);
-
-    const lobbyInfo = await this.redis.hgetall(`loadpolus.lobby.${joinedGamePacket.lobbyCode}`);
-    console.log("lobbyinfo", lobbyInfo);
-
-    await this.redis.publish("loadpolus.lobby.create", JSON.stringify({
-      type: 1,
-      code: joinedGamePacket.lobbyCode,
-      hostsJson: lobbyInfo.hostsJson,
-      targetNode: best.nodeName
-    }));
-    console.log("published the funny request");
-
-    await this.redis.hmset(`loadpolus.lobby.${joinedGamePacket.lobbyCode}`, {
-      host: best.host,
-      port: best.port,
-    });
-
-    console.log("updated the info");
-
-    this.transitioningConnections.set(joinedGamePacket.lobbyCode, [sender]);
   }
 }
