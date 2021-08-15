@@ -243,15 +243,12 @@ export class Server {
 
       this.lobbyCache = tempCache;
 
-      // update dynamicConfig
       const dynamicConfigCache = await this.redis.hgetall("loadpolus.config");
 
       if (Object.keys(dynamicConfigCache).length == 0) {
-        throw Error("loadpolus.config is not present in Redis");
-      }
-
-      if (!("targetVersion" in dynamicConfigCache)) {
-        throw Error("key targetVersion in loadpolus.config is not present in Redis");
+        this.debugLog("loadpolus.config is not present in Redis");
+      } else if (!("targetVersion" in dynamicConfigCache)) {
+        this.debugLog("key targetVersion in loadpolus.config is not present in Redis");
       }
 
       this.dynamicConfig = dynamicConfigCache;
