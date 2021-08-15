@@ -20,9 +20,9 @@
   },
   "homepage": "https://github.com/polusgg/server-loadpolus",
   "dependencies": {
-    "@nodepolus/framework": "../nodepolus-framework/",
-    "@polusgg/module-polusgg-auth-api": "../module-polusgg-auth-api/",
-    "@polusgg/plugin-polusgg-api": "../plugin-polusgg-api/",
+    "@nodepolus/framework": "latest",
+    "@polusgg/module-polusgg-auth-api": "latest",
+    "@polusgg/plugin-polusgg-api": "latest",
     "ioredis": "^4.22.0",
     "ts-node": "^9.1.0"
   },
