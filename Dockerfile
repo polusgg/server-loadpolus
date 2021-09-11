@@ -13,7 +13,8 @@ ENV NP_REDIS_HOST \
     NP_REDIS_PASSWORD \
     NP_DROPLET_BIND_ADDRESS \
     NP_DROPLET_ADDRESS \
-    NP_DROPLET_PORT
+    NP_DROPLET_PORT \
+    NP_LOG_DEBUG
 
 COPY --chown=node:node .npmrc_docker \
                        ./.npmrc
