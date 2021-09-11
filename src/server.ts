@@ -476,6 +476,7 @@ export class Server {
   }
 
   private debugLog(..._args: unknown[]): void {
+    if (!this.config.debug) return;
     console.log(..._args);
   }
 
