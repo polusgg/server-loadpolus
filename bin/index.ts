@@ -15,6 +15,11 @@ async function loadConfig(configPath: string = path.join(__dirname, "config.json
 }
 
 (async (): Promise<void> => {
+  process.on("uncaughtException", (err, origin) => {
+    console.warn(`Uncaught exception: ${err}\nException Origin: ${origin}`);
+  })
+
+
   try {
     const config = await loadConfig();
     const server = new Server(config);
