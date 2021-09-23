@@ -174,6 +174,12 @@ export class Server {
         return false;
       }
 
+      if (game.creator === "true") {
+        this.debugLog("sort filtered out", game, "due to being a creator lobby");
+
+        return false;
+      }
+
       if (game.serverVersion != targetVersion) {
         this.debugLog("sort filtered out", game, "due to wrong version");
 
