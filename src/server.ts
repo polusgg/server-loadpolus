@@ -34,8 +34,10 @@ export class Server {
   private connectionIndex = 0;
   private isRefreshing = false;
   private lobbyCache: Record<string, string>[] = [];
+  private lobbyCacheMap: Map<string, Record<string, string>> = new Map();
   private gamemodes: string[] = [];
   private dynamicConfig: Record<string, string> = {};
+  private lobbyPlayerCountCache: Map<string, [number, number]> = new Map();
 
   constructor(
     public readonly config: Config,
@@ -99,6 +101,12 @@ export class Server {
       });
     });
 
+    setInterval(() => {
+      this.lobbyPlayerCountCache.forEach((value, key) => {
+
+      });
+    }, 1000);
+
     this.authHandler = new AuthHandler(process.env.NP_AUTH_TOKEN ?? "");
   }
 
@@ -122,6 +130,36 @@ export class Server {
     );
 
     return connection;
+  }
+
+  private getPlayersInLobby(lobbyCode: string): [number, number] | undefined {
+    const lobbyData = this.lobbyPlayerCountCache.get(lobbyCode);
+
+    // if it doesn't exist or it's expired
+    if ((lobbyData === undefined) || ((Date.now() - lobbyData[1]) > 6000)) {
+      // add to cache, fetching value from lobbyCache
+      const lobbyData = this.lobbyCacheMap.get(lobbyCode);
+
+      if (!lobbyData) {
+        return undefined;
+      }
+
+      this.lobbyPlayerCountCache.set(lobbyCode, [parseInt(lobbyData.currentPlayers, 10), Date.now()]);
+    }
+
+    return this.lobbyPlayerCountCache.get(lobbyCode)!;
+  }
+
+  private bumpPlayerCount(lobbyCode: string) {
+    const currentPlayerCount = this.getPlayersInLobby(lobbyCode);
+
+    if (currentPlayerCount === undefined) {
+      return;
+    }
+
+    currentPlayerCount[0] += 1;
+
+    this.lobbyPlayerCountCache.set(lobbyCode, currentPlayerCount);
   }
 
   private handleMatchmaking(gamemode: string, connection: Connection): void {
@@ -148,7 +186,13 @@ export class Server {
         return false;
       }
 
-      if (parseInt(game.currentPlayers, 10) >= parseInt(game.maxPlayers, 10)) {
+      const playerCount = parseInt(game.currentPlayers, 10); // this.getPlayersInLobby(game.code);
+
+      if (playerCount === undefined) {
+        return false;
+      }
+
+      if (playerCount[0] >= parseInt(game.maxPlayers, 10)) {
         this.debugLog("sort filtered out", game, "due to being full");
 
         return false;
@@ -164,12 +208,14 @@ export class Server {
     });
 
     if (results.length < 1) {
-      connection.disconnect(DisconnectReason.custom(`Could not find a public ${gamemode} lobby for you to join.\nWhy not host your own?`));
+      connection.disconnect(DisconnectReason.custom(`There are no public ${gamemode} lobbies.\nYou can host your own by clicking "Create Game".`));
 
       return;
     }
 
-    const lobby = results[Math.floor(Math.random() * results.length)];
+    const lobby = results.sort((a, b) => parseInt(a.currentPlayers, 10) - parseInt(b.currentPlayers, 10))[results.length - 1];
+
+    // this.bumpPlayerCount(lobby.code);
 
     connection.sendReliable([
       new HostGameResponsePacket(lobby.code),
@@ -181,6 +227,21 @@ export class Server {
     return ((connection: Connection): void => {
       this.handleMatchmaking(gamemode, connection);
     }).bind(this);
+  }
+
+  private purgeOldCacheEntries() {
+    const stamp = Date.now();
+    const oldEntries: string[] = [];
+
+    this.lobbyPlayerCountCache.forEach((data, gamecode) => {
+      if ((stamp - data[1]) > 6000) {
+        oldEntries.push(gamecode);
+      }
+    });
+
+    oldEntries.forEach(gamecode => {
+      this.lobbyPlayerCountCache.delete(gamecode);
+    });
   }
 
   private async refreshRedisData(): Promise<void> {
@@ -257,6 +318,7 @@ export class Server {
     }
 
     //this.debugLog("updateGameCache() results", this.lobbyCache);
+    // this.purgeOldCacheEntries();
   }
 
   private async fetchNodes(nodesKey: string = "loadpolus.nodes"): Promise<Map<string, Record<string, string>>> {
@@ -307,7 +369,7 @@ export class Server {
     switch (packet.getType()) {
       case RootPacketType.HostGame: {
         if (this.redis.status != "ready") {
-          sender.disconnect(DisconnectReason.custom("An error occured while creating your game, and the developers have been notified.\n\nPlease try again."));
+          sender.disconnect(DisconnectReason.custom("A database error occurred, and developers have been notified.\n\nPlease try again later."));
           console.error("Kicked", sender.getConnectionInfo().toString(), "because redis.status != ready! Make sure Redis is available.");
 
           return;
