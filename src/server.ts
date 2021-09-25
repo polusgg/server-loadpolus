@@ -37,7 +37,7 @@ export class Server {
   private lobbyCacheMap: Map<string, Record<string, string>> = new Map();
   private gamemodes: string[] = [];
   private dynamicConfig: Record<string, string> = {};
-  private lobbyPlayerCountCache: Map<string, [number, number]> = new Map();
+  private lobbyPlayerCountCache: Map<string, [playerCount: number, setTime: number]> = new Map();
 
   constructor(
     public readonly config: Config,
@@ -62,6 +62,14 @@ export class Server {
       console.error(error);
     });
 
+    this.socket.on("close", () => {
+      console.log("Sock close");
+    })
+    
+    this.socket.on("connect", () => {
+      console.log("Sock connect?")
+    })
+
     this.socket.on("message", (buf, remoteInfo) => {
       const connection = this.getConnection(ConnectionInfo.fromString(`${remoteInfo.address}:${remoteInfo.port}`));
       let message = MessageReader.fromRawBytes(buf);
@@ -84,14 +92,19 @@ export class Server {
     this.redis.once("connect", async () => {
       console.log(`Redis connected to ${config.redis.host}:${config.redis.port}`);
 
+      console.log("Fetching gamemodes");
+      
       this.gamemodes = await this.redis.smembers("loadpolus.config.gamemodes");
-
+      console.log("gamemodes fetched", this.gamemodes);
+      
       for (let i = 0; i < this.gamemodes.length; i++) {
         const code = `[]${`${i}`.padStart(2, "0")}`;
 
         this.reservedCodes.set(this.gamemodes[i], code);
         this.codeCallbacks.set(code, this.createMatchmakingFunction(this.gamemodes[i]));
       }
+
+      this.refreshRedisData();
 
       setInterval(this.refreshRedisData.bind(this), 3000);
 
@@ -102,8 +115,13 @@ export class Server {
     });
 
     setInterval(() => {
-      this.lobbyPlayerCountCache.forEach((value, key) => {
+      // mild perf bump by caching Date
+      const nowCache = Date.now();
 
+      this.lobbyPlayerCountCache.forEach((value, key) => {
+        if (nowCache > value[1] + 6_000) {
+          this.lobbyPlayerCountCache.delete(key);
+        }
       });
     }, 1000);
 
@@ -132,40 +150,49 @@ export class Server {
     return connection;
   }
 
-  private getPlayersInLobby(lobbyCode: string): [number, number] | undefined {
-    const lobbyData = this.lobbyPlayerCountCache.get(lobbyCode);
+  private getPlayersInLobby(lobbyCode: string): number | undefined {
+    const playerCountCacheResult = this.lobbyPlayerCountCache.get(lobbyCode);
 
-    // if it doesn't exist or it's expired
-    if ((lobbyData === undefined) || ((Date.now() - lobbyData[1]) > 6000)) {
-      // add to cache, fetching value from lobbyCache
-      const lobbyData = this.lobbyCacheMap.get(lobbyCode);
+    console.log("CACHERES", lobbyCode, playerCountCacheResult);
 
-      if (!lobbyData) {
-        return undefined;
-      }
-
-      this.lobbyPlayerCountCache.set(lobbyCode, [parseInt(lobbyData.currentPlayers, 10), Date.now()]);
+    if (playerCountCacheResult) {
+      return playerCountCacheResult[0];
     }
 
-    return this.lobbyPlayerCountCache.get(lobbyCode)!;
+    // add to cache, fetching value from lobbyCache
+    const lobbyData = this.lobbyCacheMap.get(lobbyCode);
+
+    if (!lobbyData) {
+      return undefined;
+    }
+
+    const currentPlayers = parseInt(lobbyData.currentPlayers, 10);
+
+    this.lobbyPlayerCountCache.set(lobbyCode, [currentPlayers, Date.now()]);
+
+    return currentPlayers;
   }
 
-  private bumpPlayerCount(lobbyCode: string) {
-    const currentPlayerCount = this.getPlayersInLobby(lobbyCode);
+  private bumpPlayerCount(lobby: string): boolean {
+    const playerCountCache = this.lobbyPlayerCountCache.get(lobby);
 
-    if (currentPlayerCount === undefined) {
-      return;
+    if (playerCountCache === undefined) {
+      console.warn("Failed to find cached player count. A precondition of `bumpPlayerCount` is that the cached element exists");
+      return false;
     }
 
-    currentPlayerCount[0] += 1;
+    console.trace("Bumping", lobby, "rfom", playerCountCache[0], "to", playerCountCache[0] + 1)
 
-    this.lobbyPlayerCountCache.set(lobbyCode, currentPlayerCount);
+    this.lobbyPlayerCountCache.set(lobby, [playerCountCache[0] + 1, playerCountCache[1]]);
+    return true;
   }
 
   private handleMatchmaking(gamemode: string, connection: Connection): void {
-    this.debugLog("handleMatchmaking() invoked", gamemode, connection);
+    // this.debugLog("handleMatchmaking() invoked", gamemode, connection);
 
     const targetVersion = this.getTargetVersion();
+
+    console.log("lobbyCache", this.lobbyCache);
 
     const results = this.lobbyCache.filter(game => {
       if (game.public !== "true") {
@@ -192,13 +219,17 @@ export class Server {
         return false;
       }
 
-      const playerCount = parseInt(game.currentPlayers, 10); // this.getPlayersInLobby(game.code);
+      const playerCount = this.getPlayersInLobby(game.code);
+
+      console.log(`LOBBY`, game.code, "PC", playerCount);
 
       if (playerCount === undefined) {
+        this.debugLog("sort filtered out", game, "playercount undefined");
+
         return false;
       }
 
-      if (playerCount[0] >= parseInt(game.maxPlayers, 10)) {
+      if (playerCount >= parseInt(game.maxPlayers, 10)) {
         this.debugLog("sort filtered out", game, "due to being full");
 
         return false;
@@ -213,15 +244,43 @@ export class Server {
       return true;
     });
 
+    console.log(results)
+
     if (results.length < 1) {
       connection.disconnect(DisconnectReason.custom(`There are no public ${gamemode} lobbies.\nYou can host your own by clicking "Create Game".`));
 
       return;
     }
 
-    const lobby = results.sort((a, b) => parseInt(a.currentPlayers, 10) - parseInt(b.currentPlayers, 10))[results.length - 1];
+    let lobby: any;
+    let suceeded = false;
+    let idx = 0;
+    const sort = results.sort((a, b) => (-parseInt(a.currentPlayers, 10)) - parseInt(b.currentPlayers, 10));
 
-    // this.bumpPlayerCount(lobby.code);
+    console.log(sort);
+
+    while (!suceeded) {
+      if (idx !== 0) {
+        if (idx > 8) {
+          console.warn("Failed to move player to", lobby.code, "ending recover attempt.");
+          connection.disconnect(DisconnectReason.custom(`We had some issues matchmaking you. Please report this code to the developers <b>11:02</b>`));
+          return;
+        }
+
+        console.warn("Failed to move player to", lobby.code, "attempting to recover.");
+      }
+
+      lobby = sort[idx];
+
+      if (!lobby) {
+        console.warn("Ran out of lobbies. Ending recover attempt.");
+        connection.disconnect(DisconnectReason.custom(`We had some issues matchmaking you. Please report this code to the developers <b>11:03</b>`));
+        return;
+      }
+
+      suceeded = this.bumpPlayerCount(lobby.code);
+      idx++;
+    }
 
     connection.sendReliable([
       new HostGameResponsePacket(lobby.code),
@@ -235,23 +294,8 @@ export class Server {
     }).bind(this);
   }
 
-  private purgeOldCacheEntries() {
-    const stamp = Date.now();
-    const oldEntries: string[] = [];
-
-    this.lobbyPlayerCountCache.forEach((data, gamecode) => {
-      if ((stamp - data[1]) > 6000) {
-        oldEntries.push(gamecode);
-      }
-    });
-
-    oldEntries.forEach(gamecode => {
-      this.lobbyPlayerCountCache.delete(gamecode);
-    });
-  }
-
   private async refreshRedisData(): Promise<void> {
-    //this.debugLog("updateGameCache() invoked");
+    // this.debugLog("updateGameCache() invoked");
 
     if (this.isRefreshing) {
       this.debugLog("refreshRedisData() cancelled due to this.isRefreshing");
@@ -305,6 +349,8 @@ export class Server {
 
         result[1].code = codes[i];
 
+        this.lobbyCacheMap.set(result[1].code, result[1]);
+
         tempCache.push(result[1]);
       }
 
@@ -319,11 +365,13 @@ export class Server {
       }
 
       this.dynamicConfig = dynamicConfigCache;
+    } catch (e) {
+      console.log(e)
     } finally {
       this.isRefreshing = false;
     }
 
-    //this.debugLog("updateGameCache() results", this.lobbyCache);
+    this.debugLog("updateGameCache() results", this.lobbyCache);
     // this.purgeOldCacheEntries();
   }
 
@@ -370,7 +418,7 @@ export class Server {
   }
 
   private async handlePacket(packet: BaseRootPacket, sender: Connection): Promise<void> {
-    this.debugLog("handlePacket() invoked", packet, sender);
+    // this.debugLog("handlePacket() invoked", packet, sender);
 
     switch (packet.getType()) {
       case RootPacketType.HostGame: {
@@ -544,7 +592,7 @@ export class Server {
   }
 
   private debugLog(..._args: unknown[]): void {
-    if (!this.config.debug) return;
+    // if (!this.config.debug) return;
     console.log(..._args);
   }
 
